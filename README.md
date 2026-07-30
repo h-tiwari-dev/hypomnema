@@ -5,21 +5,34 @@
 </p>
 
 <p align="center">
-  Local memory for Cursor, Claude, and Codex.
+  <strong>Your agents forget. Hypomnema keeps the thread.</strong>
 </p>
 
 <p align="center">
   <code>local-first</code> · <code>stdlib only</code> · <code>single file</code>
 </p>
 
-Hypomnema turns local agent history into useful context. Ask what you worked
-on, prepare a standup, find an old conversation, or continue where you left
-off.
+<p align="center">
+  <a href="#start-in-60-seconds">Start</a> ·
+  <a href="#talk-to-your-history">Use with an agent</a> ·
+  <a href="#choose-where-memory-lives">Storage</a> ·
+  <a href="#jump-back-in">Resume</a> ·
+  <a href="#bring-your-own-source">Extend</a>
+</p>
 
-Your history stays on your machine unless your chosen agent sends it remotely
+AI coding sessions create valuable context, then bury it in transcript folders.
+Hypomnema turns that history into something you can use again.
+
+| Recall | Report | Resume |
+| --- | --- | --- |
+| Find what happened in any local agent session | Turn real activity into a standup or worklog | Reopen the original conversation and continue |
+
+> Your work already has a history. Hypomnema makes it useful.
+
+Local history stays on your machine unless your chosen agent sends it remotely
 or you commit and push a Git archive.
 
-## Quick start
+## Start in 60 seconds
 
 Requires macOS and Python 3.8+.
 
@@ -34,7 +47,7 @@ The installer adds the CLI to `~/.local/bin` and installs the user-level skill
 for Cursor, Claude Code, and Codex. No Python packages, account, or API key are
 required.
 
-## Install with your agent
+### Prefer delegating setup?
 
 Paste this into Cursor, Claude Code, or Codex:
 
@@ -49,7 +62,7 @@ current project. Tell me to start a new agent session without resuming this
 one.
 ```
 
-## Use it from an agent session
+## Talk to your history
 
 Start a new session after installation. Do not resume the installer session:
 
@@ -69,7 +82,7 @@ Give me the command to resume the second result.
 ```
 
 <details>
-<summary>Example: ask, then refine the answer</summary>
+<summary><strong>See a real conversation</strong></summary>
 
 **You**
 
@@ -133,7 +146,7 @@ instructions. Summarize completed work, next steps, and blockers. Do not invent
 anything the records do not support.
 ```
 
-## What it does
+## One tool, four steps
 
 ```text
 Cursor / Claude / Codex / custom collectors
@@ -151,7 +164,7 @@ Cursor / Claude / Codex / custom collectors
 - Remembers session IDs so you can return to the original conversation.
 - Supports custom collectors without a plugin framework.
 
-## Common commands
+## The useful commands
 
 | Goal | Command |
 | --- | --- |
@@ -168,7 +181,7 @@ Cursor / Claude / Codex / custom collectors
 
 Run `hypomnema --help` for every option.
 
-## Memory and storage
+## Choose where memory lives
 
 Fresh scans save deduplicated activity records. Generated reports are not
 saved.
@@ -190,7 +203,7 @@ Hypomnema never stages or commits `.hypomnema/activity.jsonl`. Review it before
 committing: it may contain code, paths, secrets, work text, and resumable
 session IDs.
 
-## Return to a conversation
+## Jump back in
 
 List recent sessions, open the picker, or resume a known session:
 
@@ -211,7 +224,7 @@ Hypomnema opens the remembered workspace and delegates to the original agent:
 Claude Desktop conversations can appear in reports but cannot be resumed
 through the Claude Code CLI.
 
-## Add a source
+## Bring your own source
 
 Create an executable named `hypomnema-source-NAME`, put it on `PATH`, and run:
 
@@ -234,7 +247,7 @@ It writes one JSON record per line to stdout:
 Collectors are trusted executables and run with your user permissions.
 `--source` selects only the named sources and can be repeated.
 
-## Privacy
+## Privacy, plainly
 
 - Built-in sources read transcript files already stored on your machine.
 - AI summaries send a selected, truncated record set to the chosen local agent
@@ -244,7 +257,7 @@ Collectors are trusted executables and run with your user permissions.
 - SQLite is permission-restricted but not encrypted.
 - Git storage is unredacted and remains in Git history after deletion.
 
-## Uninstall
+## Remove Hypomnema
 
 ```sh
 rm "$HOME/.local/bin/hypomnema"
@@ -257,7 +270,7 @@ rm -r "$HOME/.agents/skills/hypomnema"
 If you chose custom install, data, or Git locations, remove those instead.
 
 <details>
-<summary>Why “Hypomnema”?</summary>
+<summary><strong>Why “Hypomnema”?</strong></summary>
 
 The name comes from ὑπόμνημα: an Ancient Greek reminder or written record—a
 material memory.
