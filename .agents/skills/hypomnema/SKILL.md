@@ -1,9 +1,9 @@
 ---
-name: hypomnema-history
+name: hypomnema
 description: Retrieve and summarize local Cursor UI, Claude Code, Claude Desktop local/cowork, and Codex activity with Hypomnema, or find a remembered conversation to resume. Use when asked what someone did yesterday, for a standup or weekly update, for recent agent work, for work history scoped to a project or folder, or to return to an earlier agent session.
 ---
 
-# Hypomnema History
+# Hypomnema
 
 Retrieve records as JSON and summarize them in the current chat. Do not invoke
 another summarization harness.

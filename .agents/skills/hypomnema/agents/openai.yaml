@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hypomnema"
+  short_description: "Recall local agent work and conversations"
+  default_prompt: "Use $hypomnema to recall my recent work in this project."

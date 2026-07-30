@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="./assets/hypomnema-banner.svg" alt="Hypomnema — your work, remembered" width="100%">
+  <a href="./assets/hypomnema-banner.svg">
+    <img src="./assets/hypomnema-banner.svg" alt="Hypomnema — your work, remembered" width="100%">
+  </a>
 </p>
 
 <p align="center">
@@ -372,34 +374,37 @@ matching conversations. After I choose one, give me the exact
 agent from this chat.
 ```
 
-### Project skill
+### Talk to Hypomnema from an agent session
 
-This repository also ships a shared `hypomnema-history` skill:
-
-```text
-.agents/skills/hypomnema-history/   # canonical skill
-.cursor/skills/hypomnema-history    # Cursor project link
-.claude/skills/hypomnema-history    # Claude project link
-```
-
-Open the Hypomnema project in Cursor, Claude, or Codex and ask:
+This repository ships one shared `hypomnema` skill:
 
 ```text
-What did I do yesterday in this project?
-Prepare my standup from the last 7 days.
-Summarize yesterday across ~/work/api and ~/work/worker.
+.agents/skills/hypomnema/   # canonical skill used by Codex
+.cursor/skills/hypomnema    # Cursor project link
+.claude/skills/hypomnema    # Claude project link
 ```
 
-Or invoke the skill explicitly:
+Open this project in your agent, start a new session so it discovers the skill,
+then invoke it directly:
 
 ```text
-Cursor: /hypomnema-history What did I do yesterday in this folder?
-Claude: /hypomnema-history Prepare my seven-day standup.
-Codex:  $hypomnema-history Summarize yesterday for the current project.
+Cursor Agent: /hypomnema What did I do yesterday in this project?
+Claude Code:  /hypomnema Prepare my standup from the last 7 days.
+Codex:        $hypomnema Summarize yesterday for the current project.
 ```
 
-The skill requests filtered JSON from Hypomnema and lets the current chat write
-the report. It does not launch a second summarization agent.
+Use the same command as a conversation. For example:
+
+```text
+/hypomnema Show my remembered conversations for this project.
+/hypomnema Find the conversation where I worked on local Git storage.
+/hypomnema Give me the command to resume the second result.
+```
+
+In Codex, replace `/hypomnema` with `$hypomnema`. Natural-language requests
+such as “What did I do yesterday?” also work when the agent selects the skill
+automatically. The skill retrieves filtered local history into the current
+chat; it never launches a second agent.
 
 ## Privacy and known limits
 
