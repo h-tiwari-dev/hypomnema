@@ -68,6 +68,51 @@ What is still unfinished?
 Give me the command to resume the second result.
 ```
 
+<details>
+<summary>Example: ask, then refine the answer</summary>
+
+**You**
+
+```text
+/hypomnema for this folder and today
+```
+
+**Agent**
+
+```text
+Today — ~/work/sample-agent-app
+
+- Investigated duplicate tool calls in the chat workflow
+- Traced the issue to retry handling in the API
+- Added a guard and regression coverage
+- Confirmed no frontend change was needed
+
+Resume: hypomnema --resume SESSION_ID
+```
+
+**You**
+
+```text
+Give me 10 points.
+```
+
+**Agent**
+
+```text
+1. Reproduced duplicate tool calls in the chat workflow
+2. Traced the duplicate requests through the API logs
+3. Identified retry handling as the source
+4. Added a guard against repeated tool execution
+5. Added regression coverage for the failure
+6. Verified normal retries still work
+7. Reviewed the related prompt configuration
+8. Confirmed the frontend needs no change
+9. Documented the remaining rollout check
+10. Saved the original session so it can be resumed
+```
+
+</details>
+
 Cursor and Claude use `/hypomnema`; Codex uses `$hypomnema`.
 
 | Agent | Installed skill |
