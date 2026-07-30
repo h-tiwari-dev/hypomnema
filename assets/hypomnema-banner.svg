@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 460" role="img" aria-labelledby="title desc">
+  <title id="title">Hypomnema</title>
+  <desc id="desc">An abstract editorial composition of memory fragments gathered into a single form.</desc>
+
+  <rect width="1800" height="460" fill="#f1eee7"/>
+  <rect x="22" y="22" width="1756" height="416" fill="none" stroke="#171717" stroke-width="3"/>
+
+  <g fill="#171717" font-family="Arial, Helvetica, sans-serif">
+    <text x="94" y="230" font-size="126" font-weight="800" letter-spacing="3">HYPOMNEMA</text>
+    <text x="101" y="300" font-size="32" font-weight="500" letter-spacing="1.5">Your work, remembered.</text>
+  </g>
+
+  <g aria-hidden="true">
+    <circle cx="1480" cy="230" r="174" fill="#2859e8"/>
+    <rect x="1272" y="56" width="104" height="348" fill="#171717"/>
+    <rect x="1578" y="56" width="92" height="348" fill="#e55c3d"/>
+
+    <g fill="#f1eee7">
+      <rect x="1224" y="104" width="208" height="16"/>
+      <rect x="1320" y="146" width="314" height="16"/>
+      <rect x="1200" y="188" width="248" height="16"/>
+      <rect x="1370" y="230" width="300" height="16"/>
+      <rect x="1248" y="272" width="252" height="16"/>
+      <rect x="1320" y="314" width="350" height="16"/>
+      <rect x="1194" y="356" width="286" height="16"/>
+    </g>
+
+    <circle cx="1624" cy="92" r="18" fill="#f1eee7"/>
+    <circle cx="1624" cy="368" r="18" fill="#171717"/>
+    <path d="M1126 94v272" fill="none" stroke="#171717" stroke-width="3"/>
+    <path d="M1108 94h36M1108 366h36" fill="none" stroke="#171717" stroke-width="3"/>
+  </g>
+</svg>

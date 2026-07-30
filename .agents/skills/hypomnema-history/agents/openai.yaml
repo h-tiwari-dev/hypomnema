@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hypomnema History"
+  short_description: "Summarize recent local agent work history"
+  default_prompt: "Use $hypomnema-history to prepare my scoped standup update."
