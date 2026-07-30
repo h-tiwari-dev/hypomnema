@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Your agents forget. Hypomnema keeps the thread.</strong>
+  <strong>Never lose the thread.</strong>
 </p>
 
 <p align="center">
