@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <code>local-first</code> · <code>macOS</code> · <code>Python 3.8+</code> · <code>stdlib only</code>
+  <code>local-first</code> · <code>macOS</code> · <code>Python 3.10+</code> · <code>stdlib only</code>
 </p>
 
 <p align="center">
@@ -89,7 +89,7 @@ not available.
 
 ## Start in 60 seconds
 
-Requires macOS and Python 3.8+.
+Requires macOS and Python 3.10+.
 
 ```sh
 git clone https://github.com/h-tiwari-dev/hypomnema.git
@@ -108,6 +108,9 @@ o      preview the full context
 c      copy the handoff
 /      search
 f      filter by status
+Space  open the full action palette
+?      show keyboard help
+1/2/3  mark open / blocked / completed
 ```
 
 The installer adds the CLI to `~/.local/bin` and installs the user-level skill
@@ -269,6 +272,19 @@ recovery remains available.
 
 ## Command reference
 
+Intent-led aliases are available alongside the original flags:
+
+```sh
+hypomnema continue
+hypomnema search "oauth timeout"
+hypomnema report standup
+hypomnema doctor
+```
+
+Run `hypomnema doctor` after installation to check Python, storage, local
+history sources, harness CLIs, and optional Ollama/vector search. Add `--json`
+for scripts and agents.
+
 | Goal | Command |
 | --- | --- |
 | Open the TUI (default) | `hypomnema` or `hypomnema -i` |
@@ -337,11 +353,13 @@ hypomnema --resume SESSION_ID
 The picker shows indexed coverage, result counts, status, and evidence. Choose
 `Resume or find context` to browse recent tasks or start searching in the same view.
 Press `o` to preview full context, `n` to edit the handoff in `$VISUAL`/`$EDITOR` and start fresh, `c` to copy it, `↑↓` to scroll, and
-`←→` to move between task exchanges. Press `f` to filter open/blocked/completed
-work and `?` to show the keyboard guide. Each task shows its harness, workspace
-folder, and git branch when available; if the folder moved, Hypomnema warns and
-keeps the current folder instead of silently changing location. SQLite automatic sync runs at most once
-every five minutes; Git storage syncs the current repository when memory opens.
+`←→` to move between task exchanges. Press `f` for lifecycle status, `s` for
+harness/source, `m` for match evidence, and `Space` or `:` for the full action
+palette. Each task shows its harness, workspace folder, branch, and dirty-file
+warning when available; if the folder moved, Hypomnema warns and keeps the
+current folder instead of silently changing location. SQLite automatic sync
+runs at most once every five minutes; Git storage syncs the current repository
+when memory opens.
 
 Each row is a user/assistant task exchange such as `§1.2`. `/clear`, `/new`,
 and `/reset` start the next section; an inline prompt starts its first task.
@@ -362,14 +380,15 @@ through the Claude Code CLI.
 ## UX roadmap
 
 Hypomnema is designed as a safe “get back to work” layer across coding
-harnesses. The current flow supports task status, harness readiness, workspace
-and branch visibility, editable handoffs, launch confirmation, fresh-session
-handoffs, search, filters, and copy-only recovery.
+harnesses. The current flow supports task lifecycle labels, harness readiness,
+workspace and branch visibility, dirty-worktree warnings, editable and
+redacted handoffs, launch confirmation, fresh-session fallback, search filters,
+an action palette, and copy-only recovery.
 
 Planned UX improvements are tracked in
 [UX_IMPROVEMENT_NOTES.md](UX_IMPROVEMENT_NOTES.md). The current priority is to
-add installed-harness fallback, worktree awareness, session health, lifecycle
-actions, and conservative secret redaction while keeping the local-first TUI.
+add a richer harness chooser, deeper worktree identity, session-health history,
+and optional local friction metrics while keeping the local-first TUI.
 
 ## Bring your own source
 
@@ -402,6 +421,9 @@ Collectors are trusted executables and run with your user permissions.
 - `--no-ai` skips AI summarization.
 - `--storage none` prevents an activity archive from being written.
 - SQLite is permission-restricted but not encrypted.
+- Copied and fresh-session handoffs conservatively redact high-confidence
+  credentials and report when redaction occurred.
+- Resume and fresh launch warn when the remembered workspace is dirty or missing.
 - Vector search sends text only to Ollama on `127.0.0.1` and stores its vectors
   in SQLite.
 - Git storage is unredacted and remains in Git history after deletion.

@@ -2,8 +2,8 @@
 set -eu
 
 if ! command -v python3 >/dev/null 2>&1 ||
-   ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 8))'; then
-  echo "hypomnema needs Python 3.8 or newer." >&2
+   ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+  echo "hypomnema needs Python 3.10 or newer." >&2
   exit 1
 fi
 

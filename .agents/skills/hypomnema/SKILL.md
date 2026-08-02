@@ -14,12 +14,22 @@ context** to browse recent tasks or start searching in the same view. Choose
 Search covers
 phrases, words, prefixes, and likely typos, with user prompts ranked ahead of
 assistant context. Press `o` to preview full role-labelled context, `c` to copy
-a handoff, scroll with `↑↓`, and move across exchanges with `←→`. Press `f` to
-filter open/blocked/completed work and `?` for the keyboard guide. Memory
-Each result shows harness readiness and the remembered workspace folder/branch;
-missing folders are reported before resume and the current folder is preserved.
-Memory operations automatically sync the latest 30 days; SQLite throttles this to once
-every five minutes.
+a handoff, scroll with `↑↓`, and move across exchanges with `←→`. Press `f` for
+lifecycle status, `s` for harness/source, `m` for match evidence, and `Space` or
+`:` for the action palette. `?` opens the complete keyboard guide. Each result
+shows harness readiness, workspace/branch, dirty-worktree warnings, and missing
+folder recovery. Handoffs are structured and conservatively redacted before
+copy or fresh launch. Memory operations automatically sync the latest 30 days;
+SQLite throttles this to once every five minutes.
+
+Intent-led command aliases are also available:
+
+```sh
+hypomnema continue
+hypomnema search "WORDS"
+hypomnema report standup
+hypomnema doctor --json
+```
 
 For agent-driven conversation lookup, run:
 

@@ -275,13 +275,19 @@ The goal is not surveillance; it is identifying friction in a local tool.
 
 ## Recommended implementation order
 
-1. Validate the current editable-handoff and confirmation flow.
-2. Add installed-harness fallback.
-3. Add worktree and dirty-state information.
-4. Add session health and lifecycle metadata.
-5. Add conservative secret redaction.
-6. Add local friction counters only if the first five changes still leave
-   uncertainty.
+The first five items are now implemented in the local TUI and CLI:
+
+1. Editable handoffs and launch confirmation.
+2. Harness readiness and fresh-session fallback.
+3. Workspace, branch, and dirty-state awareness.
+4. Session lifecycle labels and action palette.
+5. Conservative secret redaction.
+
+The next layer should be deliberately smaller:
+
+6. Add an explicit harness chooser when multiple fallback CLIs are installed.
+7. Add worktree identity and last-observed commit information.
+8. Add session-health history and optional local friction counters.
 
 ## Deliberate non-goals
 
