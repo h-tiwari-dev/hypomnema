@@ -59,6 +59,25 @@ The workflow illustration is an SVG asset, so it stays sharp in dark and light
 repository views. Its subtle motion is disabled automatically when the viewer
 requests reduced motion.
 
+## The interface
+
+<p align="center">
+  <img src="./assets/hypomnema-tui.svg" alt="Hypomnema terminal task picker with search, status, harness readiness, workspace, and keyboard actions" width="100%">
+</p>
+
+The picker keeps the important decision visible: what the task is, where it
+will run, which harness will receive it, and what happens if native resume is
+not available.
+
+### Before and after
+
+| Without Hypomnema | With Hypomnema |
+| --- | --- |
+| Search multiple transcript folders by hand | Search task exchanges in one local view |
+| Guess which session contains the missing context | See title, status, evidence, and outcome together |
+| Reconstruct a prompt from memory | Edit a generated handoff before starting fresh |
+| Launch into an unknown directory | Confirm harness, workspace, and branch first |
+
 ## Start in 60 seconds
 
 Requires macOS and Python 3.8+.
@@ -207,6 +226,37 @@ Cursor / Claude / Codex / Copilot / custom collectors
   as hard boundaries without dropping an inline prompt.
 - Automatically syncs the latest 30 days before memory search or resume.
 - Supports custom collectors without a plugin framework.
+
+### Architecture at a glance
+
+```mermaid
+flowchart LR
+  A[Cursor / Claude / Codex / Copilot] --> B[Local collectors]
+  B --> C{Storage}
+  C -->|default| D[(SQLite)]
+  C -->|portable| E[(Git JSONL)]
+  C -->|one-off| F[No archive]
+  D --> G[Lexical search]
+  D --> H[Local vector search]
+  D --> I[Reports + task picker]
+  E --> I
+  F --> I
+  I --> J[Resume or editable handoff]
+```
+
+### Harness compatibility
+
+| Harness | Read history | Native resume | Fresh handoff | Skill command |
+| --- | :---: | :---: | :---: | --- |
+| Cursor Agent | ✓ | ✓ | ✓ | `/hypomnema` |
+| Claude Code | ✓ | ✓ | ✓ | `/hypomnema` |
+| Codex | ✓ | ✓ | ✓ | `$hypomnema` |
+| GitHub Copilot | ✓ | ✓ | ✓ | `/hypomnema` |
+| Claude Desktop | ✓ | — | copy handoff | CLI fallback |
+
+Native resume always runs in the remembered workspace when it still exists.
+Fresh handoffs can be edited before launch; if a CLI is unavailable, copy-only
+recovery remains available.
 
 ## Command reference
 

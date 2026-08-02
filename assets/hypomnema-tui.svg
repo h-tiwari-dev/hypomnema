@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" role="img" aria-labelledby="title desc">
+  <title id="title">Hypomnema task picker</title>
+  <desc id="desc">A dark terminal-style task picker showing a searchable task, status, harness, workspace, and resume actions.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity=".4"/></filter>
+    <linearGradient id="chrome" x1="0" x2="1"><stop stop-color="#b44e2f"/><stop offset="1" stop-color="#c8954b"/></linearGradient>
+    <style>
+      .mono { font: 500 21px 'SFMono-Regular', Consolas, monospace; fill: #e7dcc3; }
+      .small { font: 500 17px 'SFMono-Regular', Consolas, monospace; fill: #a99881; }
+      .accent { fill: #c8954b; }
+      .green { fill: #c5d6a6; }
+    </style>
+  </defs>
+  <rect width="1600" height="920" fill="#17130f"/>
+  <rect x="80" y="60" width="1440" height="800" rx="24" fill="#211a15" stroke="#66503b" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="80" y="60" width="1440" height="68" rx="24" fill="url(#chrome)"/>
+  <circle cx="120" cy="94" r="10" fill="#17130f"/><circle cx="152" cy="94" r="10" fill="#17130f"/><circle cx="184" cy="94" r="10" fill="#17130f"/>
+  <text x="220" y="102" class="mono" fill="#17130f">hypomnema — memory</text>
+
+  <text x="130" y="180" class="small">HYPOMNEMA / MEMORY</text>
+  <text x="130" y="218" class="mono">Return to an agent conversation</text>
+  <path d="M130 246h1340" stroke="#66503b" stroke-width="2"/>
+  <text x="130" y="286" class="small">Scope       ‹ All projects ›</text>
+  <text x="130" y="324" class="small">Search      authentication timeout</text>
+  <text x="130" y="362" class="small">Filter      ‹ Open ›</text>
+  <text x="130" y="400" class="small">Last active [Open] OAuth timeout retry guard</text>
+  <text x="130" y="438" class="small">Indexed     2026-07-29 → 2026-08-02</text>
+  <path d="M130 466h1340" stroke="#66503b" stroke-width="2"/>
+
+  <rect x="120" y="500" width="1340" height="102" rx="12" fill="#33231c" stroke="#b44e2f" stroke-width="3"/>
+  <text x="150" y="542" class="mono green">▶ 08-02  Claude   api-service §2.1 [Open] · ready</text>
+  <text x="150" y="578" class="small">      Investigated OAuth timeout; retry guard still needs a regression test</text>
+  <rect x="120" y="620" width="1340" height="86" rx="12" fill="#2a211b"/>
+  <text x="150" y="658" class="mono">  08-01  Codex    billing-api §1.2 [Completed] · ready</text>
+  <text x="150" y="688" class="small">      Added idempotency protection and verified the webhook path</text>
+  <path d="M130 740h1340" stroke="#66503b" stroke-width="2"/>
+  <text x="130" y="780" class="small">Status: Open</text>
+  <text x="130" y="812" class="small">Workspace: ~/work/api-service · main</text>
+  <text x="760" y="812" class="small">↑↓ choose   / search   f filter   o preview   n start fresh</text>
+  <text x="130" y="842" class="accent mono">Enter resume task   c copy handoff   ? help   Esc back</text>
+</svg>
