@@ -13,6 +13,13 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/platform-macOS-17130f?style=flat-square" alt="macOS">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-c8954b?style=flat-square" alt="Python 3.10 or newer">
+  <img src="https://img.shields.io/badge/dependencies-stdlib%20only-b44e2f?style=flat-square" alt="Standard library only">
+  <img src="https://img.shields.io/badge/data-local--first-66503b?style=flat-square" alt="Local-first data">
+</p>
+
+<p align="center">
   <a href="#start-in-60-seconds">Start</a> ·
   <a href="#talk-to-your-history">Use with an agent</a> ·
   <a href="#choose-where-memory-lives">Storage</a> ·
@@ -34,6 +41,20 @@ return to.
 
 Local history stays on your machine unless your chosen agent sends it remotely
 or you commit and push a Git archive.
+
+> [!TIP]
+> The fastest path is `hypomnema continue`: choose a task, inspect the evidence,
+> confirm the workspace, and get back into the right harness.
+
+## Choose your path
+
+| You want to… | Start here |
+| --- | --- |
+| Continue the latest task | `hypomnema continue` |
+| Find a specific decision | `hypomnema search "WORDS"` |
+| Prepare a standup | `hypomnema report standup` |
+| Check local setup | `hypomnema doctor` |
+| Explore everything | `hypomnema` |
 
 ## Why Hypomnema
 
