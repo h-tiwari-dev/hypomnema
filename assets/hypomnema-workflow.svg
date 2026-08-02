@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 720" role="img" aria-labelledby="title desc">
+  <title id="title">Hypomnema local memory workflow</title>
+  <desc id="desc">Coding harnesses flow into local memory, then into search, reports, and safe task resumption.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#17130f"/>
+      <stop offset="1" stop-color="#2a201a"/>
+    </linearGradient>
+    <linearGradient id="memory" x1="0" x2="1">
+      <stop stop-color="#b44e2f"/>
+      <stop offset="1" stop-color="#c8954b"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000" flood-opacity=".32"/>
+    </filter>
+    <style>
+      .label { font: 600 22px Arial, Helvetica, sans-serif; fill: #e7dcc3; }
+      .small { font: 500 17px Arial, Helvetica, sans-serif; fill: #c9bda6; }
+      .eyebrow { font: 700 15px Arial, Helvetica, sans-serif; letter-spacing: 3px; fill: #c8954b; }
+      .card { fill: #211a15; stroke: #66503b; stroke-width: 2; }
+      .line { fill: none; stroke: #b44e2f; stroke-width: 6; stroke-linecap: round; }
+      .pulse { animation: pulse 2.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      .pulse.delay { animation-delay: 1.2s; }
+      .float { animation: float 4s ease-in-out infinite; }
+      @keyframes pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.18); } }
+      @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+      @media (prefers-reduced-motion: reduce) { .pulse, .float { animation: none; } }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#b44e2f"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="720" rx="28" fill="url(#bg)"/>
+  <rect x="24" y="24" width="1552" height="672" rx="20" fill="none" stroke="#b44e2f" stroke-width="3"/>
+  <text x="80" y="92" class="eyebrow">THE LOCAL MEMORY LOOP</text>
+  <text x="80" y="138" class="label" font-size="34">From scattered sessions to a safe next action.</text>
+
+  <g class="float" filter="url(#shadow)">
+    <rect class="card" x="80" y="220" width="280" height="220" rx="18"/>
+    <text x="112" y="270" class="eyebrow">01 · COLLECT</text>
+    <text x="112" y="315" class="label">Coding harnesses</text>
+    <text x="112" y="352" class="small">Cursor · Claude</text>
+    <text x="112" y="380" class="small">Codex · Copilot</text>
+    <path d="M120 405h190" stroke="#66503b" stroke-width="3"/>
+    <circle cx="135" cy="405" r="6" fill="#b44e2f"/>
+    <circle cx="160" cy="405" r="6" fill="#c8954b"/>
+    <circle cx="185" cy="405" r="6" fill="#e7dcc3"/>
+  </g>
+
+  <path class="line" d="M380 330H505" marker-end="url(#arrow)"/>
+  <circle class="pulse" cx="440" cy="330" r="11" fill="#c8954b"/>
+
+  <g class="float delay" filter="url(#shadow)">
+    <rect x="525" y="180" width="360" height="300" rx="18" fill="url(#memory)"/>
+    <rect x="548" y="203" width="314" height="254" rx="12" fill="#211a15" opacity=".92"/>
+    <text x="580" y="252" class="eyebrow">02 · REMEMBER</text>
+    <text x="580" y="300" class="label">Local memory</text>
+    <text x="580" y="340" class="small">SQLite · Git JSONL · none</text>
+    <path d="M580 372h238M580 397h182M580 422h204" stroke="#66503b" stroke-width="7" stroke-linecap="round"/>
+    <circle cx="830" cy="250" r="16" fill="#c8954b"/>
+    <path d="M830 241v18M821 250h18" stroke="#211a15" stroke-width="4"/>
+  </g>
+
+  <path class="line" d="M905 330H1030" marker-end="url(#arrow)"/>
+  <circle class="pulse delay" cx="965" cy="330" r="11" fill="#e7dcc3"/>
+
+  <g filter="url(#shadow)">
+    <rect class="card" x="1050" y="180" width="450" height="300" rx="18"/>
+    <text x="1085" y="252" class="eyebrow">03 · RETURN</text>
+    <text x="1085" y="300" class="label">Useful next actions</text>
+    <g transform="translate(1085 337)">
+      <rect width="185" height="70" rx="12" fill="#b44e2f"/>
+      <text x="20" y="30" class="small" fill="#fff">Search context</text>
+      <text x="20" y="53" class="small" fill="#fff">lexical + vector</text>
+    </g>
+    <g transform="translate(1280 337)">
+      <rect width="185" height="70" rx="12" fill="#66503b"/>
+      <text x="20" y="30" class="small">Resume task</text>
+      <text x="20" y="53" class="small">confirm + continue</text>
+    </g>
+  </g>
+
+  <path d="M800 510v74M800 584H280M800 584h1040" stroke="#66503b" stroke-width="3" fill="none"/>
+  <circle cx="280" cy="584" r="8" fill="#b44e2f"/>
+  <circle cx="1320" cy="584" r="8" fill="#c8954b"/>
+  <text x="80" y="636" class="small">Evidence stays local until you choose a harness or export a handoff.</text>
+  <text x="1090" y="636" class="small">Editable · reversible · workspace-aware</text>
+</svg>

@@ -21,6 +21,12 @@ for skill_dir in "$HOME/.agents/skills" "$HOME/.cursor/skills" "$HOME/.claude/sk
   cp -R "$skill_source/." "$skill_dir/hypomnema/"
 done
 
+legacy_copilot_skill="$HOME/.copilot/skills/hypomnema"
+if [ -d "$legacy_copilot_skill" ]; then
+  rm -r "$legacy_copilot_skill"
+  echo "Removed the redundant Copilot skill copy; Copilot uses ~/.agents/skills."
+fi
+
 case ":$PATH:" in
   *":$install_dir:"*) ;;
   *)
@@ -32,5 +38,5 @@ case ":$PATH:" in
     ;;
 esac
 
-echo "Installed hypomnema and its Cursor, Claude, and Codex skill."
+echo "Installed hypomnema and its Cursor, Claude, Codex, and Copilot skill."
 echo "Start a new agent session without --resume, then run /skills."

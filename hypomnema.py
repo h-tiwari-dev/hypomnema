@@ -5,20 +5,26 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import glob
 import hashlib
 import json
+import math
 import os
 import re
 import select
+import shlex
 import shutil
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import termios
+import textwrap
 import threading
 import tty
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -27,9 +33,12 @@ SOURCES = {
     "Claude": "~/.claude/projects/**/*.jsonl",
     "Claude UI": "~/Library/Application Support/Claude/local-agent-mode-sessions/**/.claude/projects/**/*.jsonl",
     "Codex": "~/.codex/sessions/**/*.jsonl",
+    "Copilot": str(Path(os.environ.get("COPILOT_HOME", "~/.copilot")).expanduser() / "session-state/**/events.jsonl"),
 }
 REPORTS = ("standup", "summary", "accomplishments", "blockers")
 PLUGIN_SCHEMA = 1
+AUTO_SYNC_DAYS = 30
+AUTO_SYNC_SECONDS = 300
 SOURCE_KEYS = {name.lower().replace(" ", "-"): (name, pattern) for name, pattern in SOURCES.items()}
 RECORD_FIELDS = ("source", "project", "folder", "role", "text", "day")
 STORED_FIELDS = (*RECORD_FIELDS, "session")
@@ -38,6 +47,13 @@ RESUME_COMMANDS = {
     "Cursor": ("agent", "--resume"),
     "Claude": ("claude", "--resume"),
     "Codex": ("codex", "resume"),
+    "Copilot": ("copilot", "--resume"),
+}
+FRESH_COMMANDS = {
+    "Cursor": "agent",
+    "Claude": "claude",
+    "Codex": "codex",
+    "Copilot": "copilot",
 }
 
 
@@ -118,6 +134,8 @@ def project_from(path: Path, data: dict) -> str:
         return Path(cwd).name or str(cwd)
     if "agent-transcripts" in path.parts:
         return path.parts[path.parts.index("agent-transcripts") - 1].split("-")[-1]
+    if path.name == "events.jsonl" and "session-state" in path.parts:
+        return path.parent.name
     return path.parent.name
 
 
@@ -127,6 +145,8 @@ def folder_from(path: Path, data: dict, session_project: str = "") -> str:
         return str(Path(cwd).expanduser().resolve())
     if "agent-transcripts" in path.parts:
         return path.parts[path.parts.index("agent-transcripts") - 1]
+    if path.name == "events.jsonl" and "session-state" in path.parts:
+        return path.parent.name
     return path.parent.name
 
 
@@ -168,6 +188,12 @@ def parse_file(source: str, path: Path, days: set[dt.date]) -> list[dict[str, st
                     session_project = data.get("payload", {}).get("cwd", "")
                     session = str(data.get("payload", {}).get("id") or session)
                     continue
+                if source == "Copilot" and data.get("type") in {"session.start", "session.context_changed"}:
+                    payload = data.get("data", {})
+                    context = payload.get("context", payload)
+                    session_project = context.get("cwd") or context.get("gitRoot") or session_project
+                    session = str(payload.get("sessionId") or session)
+                    continue
                 role = (
                     data.get("role")
                     or data.get("message", {}).get("role")
@@ -185,6 +211,13 @@ def parse_file(source: str, path: Path, days: set[dt.date]) -> list[dict[str, st
                     if record_day not in days or data.get("type") not in {"user", "assistant"}:
                         continue
                     content = data.get("message", {}).get("content", "")
+                elif source == "Copilot":
+                    kind = data.get("type")
+                    record_day = timestamp_day(timestamp)
+                    if record_day not in days or kind not in {"user.message", "assistant.message"}:
+                        continue
+                    role = "user" if kind == "user.message" else "assistant"
+                    content = data.get("data", {}).get("content", "")
                 else:
                     payload = data.get("payload", {})
                     record_day = timestamp_day(timestamp)
@@ -332,6 +365,21 @@ def open_sqlite(path=None):
             stored_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS embeddings (
+            id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            vector TEXT NOT NULL,
+            stored_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id, model)
+        )
+    """)
     if "session" not in {row[1] for row in connection.execute("PRAGMA table_info(activity)")}:
         connection.execute("ALTER TABLE activity ADD COLUMN session TEXT NOT NULL DEFAULT ''")
     connection.execute("CREATE INDEX IF NOT EXISTS activity_day ON activity(day)")
@@ -343,6 +391,22 @@ def open_sqlite(path=None):
     except OSError:
         pass
     return connection
+
+
+def sqlite_metadata(key: str, value=None, path=None):
+    connection = open_sqlite(path)
+    try:
+        if value is None:
+            row = connection.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
+            return row[0] if row else None
+        connection.execute(
+            "INSERT INTO metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
+        connection.commit()
+        return value
+    finally:
+        connection.close()
 
 
 def store_sqlite(records: list[dict[str, str]], path=None) -> int:
@@ -522,8 +586,90 @@ def load_memory_records(storage: str, folders=None) -> list[dict[str, str]]:
     raise ValueError("--memories and --resume require --storage sqlite or --storage git")
 
 
+def memory_sync_due(last_sync, now=None) -> bool:
+    return (now or dt.datetime.now().timestamp()) - float(last_sync or 0) >= AUTO_SYNC_SECONDS
+
+
+def auto_sync_memories(storage: str, progress=None, sources=None) -> int:
+    if storage == "none":
+        return 0
+    if storage == "sqlite":
+        if not sources and not memory_sync_due(sqlite_metadata("last_memory_sync")):
+            return 0
+        folders = None
+    else:
+        folders = [str(git_root())]
+    # ponytail: sync 30 recent days every five minutes; add file-mtime indexing if scans become slow.
+    records = collect(dt.date.today(), AUTO_SYNC_DAYS, progress, folders, sources)
+    stored = store_history(storage, records)
+    if storage == "sqlite" and not sources:
+        sqlite_metadata("last_memory_sync", dt.datetime.now().timestamp())
+    return stored
+
+
+def build_subconversation(base: dict, turns: list[dict[str, str]], section: int, task: int) -> dict:
+    user_context = "\n".join(turn["text"] for turn in turns if turn["role"] == "user")
+    context = "\n".join(f"{turn['role']}: {turn['text']}" for turn in turns)
+    outcome = next((turn["text"] for turn in reversed(turns) if turn["role"] != "user"), "")
+    title = next((line.strip() for line in turns[0]["text"].splitlines() if line.strip()), "")[:90]
+    memory = {
+        key: base[key]
+        for key in ("source", "session", "project", "folder")
+    }
+    memory.update({
+        "day": max(turn["day"] for turn in turns),
+        "subconversation": f"{section}.{task}",
+        "section": section,
+        "task": task,
+        "title": title,
+        "preview": re.sub(r"\s+", " ", turns[0]["text"])[:240],
+        "outcome": re.sub(r"\s+", " ", outcome)[:240],
+        "status": status_from_outcome(outcome),
+        "previous_title": "",
+        "next_title": "",
+        "context": context,
+        "user_context": user_context,
+        "match": "Recent",
+    })
+    visible = " ".join(
+        str(memory[key])
+        for key in ("title", "project", "source", "folder", "session", "subconversation")
+    )
+    memory["_search"] = [
+        (bias, label, " ".join(words), words)
+        for bias, label, text in (
+            (0, "Metadata", visible),
+            (1, "User", user_context),
+            (5, "Context", context),
+        )
+        for words in [tuple(re.findall(r"\w+", text.casefold()))]
+    ]
+    return memory
+
+
+def status_from_outcome(outcome: str) -> str:
+    text = outcome.casefold()
+    if re.search(r"\b(blocked|blocker|failed|failing|cannot|can't|waiting on)\b", text):
+        return "Blocked"
+    if re.search(r"\b(done|completed|fixed|shipped|implemented|merged|passed|resolved)\b", text):
+        return "Completed"
+    if re.search(r"\b(next|todo|remaining|follow[- ]?up|still|need to)\b", text):
+        return "Open"
+    return "Unknown"
+
+
+def boundary_prompt(text: str):
+    match = re.fullmatch(r"\s*/(?:clear|new|reset)(?:\s+(.*?))?\s*", text, re.I | re.DOTALL)
+    if match:
+        return (match.group(1) or "").strip()
+    if re.search(r"<command-name>\s*/(?:clear|new|reset)\s*</command-name>", text, re.I):
+        arguments = re.search(r"<command-args>(.*?)</command-args>", text, re.I | re.DOTALL)
+        return arguments.group(1).strip() if arguments else ""
+    return None
+
+
 def conversation_memories(records: list[dict[str, str]]) -> list[dict[str, str]]:
-    grouped: dict[tuple[str, str], dict[str, str]] = {}
+    grouped: dict[tuple[str, str], dict] = {}
     for record in records:
         session = record.get("session", "")
         if not SESSION_RE.fullmatch(session) or record["source"] not in RESUME_COMMANDS:
@@ -535,31 +681,345 @@ def conversation_memories(records: list[dict[str, str]]) -> list[dict[str, str]]
             "project": record["project"],
             "folder": record["folder"],
             "day": record["day"],
-            "title": "",
+            "turns": [],
         })
         if record["day"] >= memory["day"]:
             memory.update(project=record["project"], folder=record["folder"], day=record["day"])
-        if not memory["title"] and record["role"] == "user":
-            clean = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]", " ", record["text"])
-            memory["title"] = next((line.strip() for line in clean.splitlines() if line.strip()), "")[:90]
-    return sorted(grouped.values(), key=lambda item: (item["day"], item["source"], item["session"]), reverse=True)
+        clean = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]", " ", record["text"]).strip()
+        if clean:
+            memory["turns"].append({"role": record["role"], "text": clean, "day": record["day"]})
+
+    memories = []
+    for base in grouped.values():
+        section, task, turns = 1, 0, []
+        for turn in base["turns"]:
+            boundary = boundary_prompt(turn["text"]) if turn["role"] == "user" else None
+            if boundary is not None:
+                if turns:
+                    memories.append(build_subconversation(base, turns, section, task))
+                    turns = []
+                if task:
+                    section += 1
+                    task = 0
+                if boundary:
+                    task = 1
+                    turns = [{**turn, "text": boundary}]
+                continue
+            if turn["role"] == "user":
+                if turns:
+                    memories.append(build_subconversation(base, turns, section, task))
+                task += 1
+                turns = [turn]
+            elif turns:
+                turns.append(turn)
+        if turns:
+            memories.append(build_subconversation(base, turns, section, task))
+    sections = defaultdict(list)
+    for memory in memories:
+        sections[(memory["source"], memory["session"], memory["section"])].append(memory)
+    for section in sections.values():
+        for index, memory in enumerate(section):
+            if index:
+                memory["previous_title"] = section[index - 1]["title"]
+            if index + 1 < len(section):
+                memory["next_title"] = section[index + 1]["title"]
+    return sorted(
+        memories,
+        key=lambda item: (item["day"], item["source"], item["session"], item["section"], item["task"]),
+        reverse=True,
+    )
+
+
+def search_memories(memories: list[dict[str, str]], query: str) -> list[dict[str, str]]:
+    terms = re.findall(r"\w+", query.casefold())
+    if not terms:
+        for memory in memories:
+            memory["match"] = "Recent"
+        return memories
+
+    phrase = " ".join(terms)
+    kinds = ("Phrase", "Words", "Prefix", "Typo")
+
+    def quality(normalized: str, words: tuple[str, ...]):
+        if phrase in normalized:
+            return 0
+        if all(term in words for term in terms):
+            return 1
+        if all(any(word.startswith(term) for word in words) for term in terms):
+            return 2
+        if all(len(term) >= 3 and difflib.get_close_matches(term, words, n=1, cutoff=0.72) for term in terms):
+            return 3
+        return None
+
+    ranked = []
+    for memory in memories:
+        scores = [
+            (score + bias, f"{label} {kinds[score]}")
+            for bias, label, normalized, words in memory["_search"]
+            if (score := quality(normalized, words)) is not None
+        ]
+        if scores:
+            score, label = min(scores)
+            memory["match"] = label
+            ranked.append((score, memory))
+    return [memory for _, memory in sorted(ranked, key=lambda item: item[0])]
+
+
+def compact_text(text: str, limit: int) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    return f"{text[:half]} … {text[-half:]}"
+
+
+def memory_embedding_text(memory: dict[str, str]) -> str:
+    return compact_text("\n".join((memory["title"], memory["user_context"], memory["outcome"])), 6_000)
+
+
+def ollama_embeddings(texts: list[str], model: str, progress=None) -> list[list[float]]:
+    vectors = []
+    for start in range(0, len(texts), 32):
+        if progress:
+            progress(f"Embedding {min(start + 32, len(texts))}/{len(texts)} task exchanges…")
+        request = urllib.request.Request(
+            "http://127.0.0.1:11434/api/embed",
+            data=json.dumps({"model": model, "input": texts[start:start + 32], "truncate": True}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                batch = json.load(response).get("embeddings", [])
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode(errors="replace").strip()
+            raise RuntimeError(f"Ollama embedding failed: {detail or error.reason}") from error
+        except urllib.error.URLError as error:
+            raise RuntimeError("local Ollama is unavailable; start Ollama and pull the requested embedding model") from error
+        if len(batch) != len(texts[start:start + 32]):
+            raise RuntimeError("Ollama returned an incomplete embedding batch")
+        vectors.extend(batch)
+    return vectors
+
+
+def cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or len(left) != len(right):
+        return 0.0
+    denominator = math.sqrt(sum(value * value for value in left) * sum(value * value for value in right))
+    return sum(a * b for a, b in zip(left, right)) / denominator if denominator else 0.0
+
+
+def vector_search(memories: list[dict[str, str]], query: str, model: str, path=None, embed=None, progress=None):
+    if not memories or not query.strip():
+        return []
+    embed = embed or ollama_embeddings
+    query_vector = embed([query], model, progress)[0]
+    identifiers = [
+        hashlib.sha256(
+            f"{memory['source']}\0{memory['session']}\0{memory['subconversation']}\0{memory_embedding_text(memory)}".encode()
+        ).hexdigest()
+        for memory in memories
+    ]
+    connection = open_sqlite(path)
+    try:
+        cached = {}
+        identifier_set = set(identifiers)
+        for identifier, vector in connection.execute("SELECT id, vector FROM embeddings WHERE model = ?", (model,)):
+            if identifier in identifier_set:
+                try:
+                    cached[identifier] = json.loads(vector)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+        missing = [index for index, identifier in enumerate(identifiers) if identifier not in cached]
+        if missing:
+            vectors = embed([memory_embedding_text(memories[index]) for index in missing], model, progress)
+            connection.executemany(
+                "INSERT OR REPLACE INTO embeddings (id, model, vector) VALUES (?, ?, ?)",
+                [
+                    (identifiers[index], model, json.dumps(vector, separators=(",", ":")))
+                    for index, vector in zip(missing, vectors)
+                ],
+            )
+            connection.commit()
+            cached.update((identifiers[index], vector) for index, vector in zip(missing, vectors))
+    finally:
+        connection.close()
+    ranked = sorted(
+        ((cosine_similarity(query_vector, cached[identifier]), memory) for identifier, memory in zip(identifiers, memories)),
+        key=lambda item: item[0],
+        reverse=True,
+    )[:20]
+    return [{**memory, "match": "Vector", "vector_score": round(score, 4)} for score, memory in ranked]
+
+
+def memory_excerpt(memory: dict[str, str], query: str = "", limit: int = 180) -> str:
+    if not query:
+        return memory["preview"] or re.sub(r"\s+", " ", memory["context"]).strip()[:limit]
+    text = memory["user_context"] or memory["context"]
+    positions = [text.casefold().find(term) for term in query.casefold().split()]
+    found = [position for position in positions if position >= 0]
+    if found:
+        text = text[max(0, min(found) - 50):]
+    else:
+        text = memory["preview"] or text
+    return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+def preview_context_lines(memory: dict[str, str], width: int) -> list[str]:
+    lines = []
+    for paragraph in memory["context"].splitlines():
+        lines.extend(textwrap.wrap(paragraph, width=max(20, width)) or [""])
+    return lines or ["No context recorded."]
+
+
+def memory_for_agent(memory: dict[str, str], context_limit: int = 800) -> dict:
+    result = {
+        key: memory[key]
+        for key in (
+            "source", "project", "folder", "day", "session", "subconversation",
+            "title", "preview", "outcome", "previous_title", "next_title",
+        )
+    }
+    result["status"] = memory["status"]
+    result["harness"] = harness_readiness(memory)
+    result["match"] = memory["match"]
+    if "vector_score" in memory:
+        result["vector_score"] = memory["vector_score"]
+    result["user_context"] = compact_text(memory["user_context"], context_limit // 2)
+    result["context"] = compact_text(memory["context"], context_limit)
+    return result
+
+
+def handoff_text(memory: dict[str, str]) -> str:
+    return "\n".join([
+        f"Continue this task in {memory['project']}.",
+        f"Task: {memory['title'] or 'Untitled'}",
+        f"Status: {memory['status']}",
+        f"Source session: {memory['source']} {memory['session']}",
+        f"Last request: {compact_text(memory['user_context'], 500) or 'Not recorded.'}",
+        f"Context:\n{memory['context']}",
+        f"Outcome: {memory['outcome'] or 'No outcome recorded.'}",
+        "Continue from the current state; do not assume the task is complete unless the context supports it.",
+    ])
+
+
+def copy_handoff(memory: dict[str, str]) -> bool:
+    if not shutil.which("pbcopy"):
+        return False
+    try:
+        subprocess.run(["pbcopy"], input=handoff_text(memory), text=True, check=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def edit_handoff(memory: dict[str, str]) -> str | None:
+    """Open the generated handoff in the user's editor; return edited text or None."""
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    try:
+        command = shlex.split(editor)
+    except ValueError as error:
+        raise RuntimeError(f"Invalid editor setting: {error}") from error
+    if not command or not shutil.which(command[0]):
+        raise RuntimeError(f"Editor is not installed: {editor}")
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", prefix="hypomnema-handoff-", delete=False) as handle:
+            path = Path(handle.name)
+            handle.write(handoff_text(memory))
+        subprocess.run([*command, str(path)], check=True)
+        text = path.read_text()
+        return text.strip() or None
+    except (OSError, UnicodeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f"Could not edit handoff: {error}") from error
+    finally:
+        if path:
+            path.unlink(missing_ok=True)
+
+
+def workspace_branch(folder: str) -> str:
+    """Return the current branch when the remembered workspace is a git checkout."""
+    if not folder or not Path(folder).is_dir() or not shutil.which("git"):
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", folder, "branch", "--show-current"],
+            capture_output=True, text=True, check=False, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
+
+
+def workspace_summary(memory: dict[str, str]) -> str:
+    folder = memory.get("folder") or "Workspace unavailable"
+    branch = workspace_branch(memory.get("folder", ""))
+    return f"{folder} · {branch}" if branch else folder
 
 
 def render_memories(memories: list[dict[str, str]]) -> str:
     if not memories:
         return "No resumable memories yet. Run a fresh scan to index conversation links."
-    lines = ["╭─ HYPOMNEMA · CONVERSATION MEMORIES ─╮"]
+    lines = ["╭─ HYPOMNEMA · CONVERSATION TASKS ─╮"]
     for number, memory in enumerate(memories, 1):
-        lines.append(f"{number:>3}. {memory['day']} · {memory['source']} · {memory['project']}")
-        lines.append(f"     {memory['title'] or 'Untitled conversation'}")
+        lines.append(
+            f"{number:>3}. {memory['day']} · {memory['source']} ({harness_readiness(memory)}) · "
+            f"{memory['project']} · task {memory['subconversation']}"
+        )
+        lines.append(f"     [{memory['status']}] {memory['title'] or 'Untitled conversation'}")
+        lines.append(f"     workspace {workspace_summary(memory)}")
+        if memory.get("folder") and not Path(memory["folder"]).is_dir():
+            lines.append("     warning workspace folder is unavailable; resume will stay in the current folder")
+        if memory["outcome"]:
+            lines.append(f"     outcome {memory['outcome']}")
         lines.append(f"     session {memory['session']}")
     lines.append("\nRun `hypomnema --resume` to choose one, or `hypomnema --resume SESSION_ID`.")
     return "\n".join(lines)
 
 
 def resume_command(memory: dict[str, str]) -> list[str]:
-    executable, flag = RESUME_COMMANDS[memory["source"]]
+    try:
+        executable, flag = RESUME_COMMANDS[memory["source"]]
+    except KeyError as error:
+        raise RuntimeError(
+            f"{memory['source']} sessions cannot be resumed directly; use c to copy the handoff"
+        ) from error
     return [executable, flag, memory["session"]]
+
+
+def fresh_command(memory: dict[str, str], handoff: str | None = None) -> list[str]:
+    """Start a new harness session with the handoff as its initial prompt."""
+    executable = FRESH_COMMANDS.get(memory["source"])
+    if not executable:
+        raise RuntimeError(f"{memory['source']} does not support fresh sessions")
+    return [executable, handoff if handoff is not None else handoff_text(memory)]
+
+
+def start_fresh_memory(memory: dict[str, str], handoff: str | None = None) -> None:
+    command = fresh_command(memory, handoff)
+    if not shutil.which(command[0]):
+        raise RuntimeError(f"{memory['source']} CLI is not installed")
+    folder = Path(memory["folder"])
+    if folder.is_dir():
+        os.chdir(folder)
+        branch = workspace_branch(str(folder))
+        location = f"{folder}" + (f" [{branch}]" if branch else "")
+    else:
+        location = str(Path.cwd())
+        print(f"Warning: workspace folder is unavailable ({folder}); staying in the current folder.")
+    print(f"Starting a fresh {memory['source']} task in {location}…")
+    os.execvp(command[0], command)
+
+
+def harness_readiness(memory: dict[str, str]) -> str:
+    """Return a short preflight label for the native resume action."""
+    command = RESUME_COMMANDS.get(memory.get("source", ""))
+    if not command:
+        return "unavailable"
+    if not shutil.which(command[0]):
+        return "CLI unavailable"
+    if memory.get("folder") and not Path(memory["folder"]).is_dir():
+        return "workspace missing"
+    return "ready"
 
 
 def resume_memory(memories: list[dict[str, str]], session: str = "") -> None:
@@ -571,7 +1031,7 @@ def resume_memory(memories: list[dict[str, str]], session: str = "") -> None:
             raise ValueError("--resume without a session ID requires an interactive terminal")
         print(render_memories(memories))
         while True:
-            answer = input("\nResume memory [1]: ").strip() or "1"
+            answer = input("\nResume task [1]: ").strip() or "1"
             if answer.lower() in {"q", "quit"}:
                 raise SystemExit(0)
             if answer.isdigit() and 1 <= int(answer) <= len(memories):
@@ -581,13 +1041,25 @@ def resume_memory(memories: list[dict[str, str]], session: str = "") -> None:
     if memory is None:
         raise ValueError(f"conversation memory not found: {session}")
     command = resume_command(memory)
-    if not shutil.which(command[0]):
-        raise RuntimeError(f"{memory['source']} CLI is not installed")
+    readiness = harness_readiness(memory)
+    if readiness != "ready":
+        raise RuntimeError(
+            f"Cannot resume {memory['source']}: {readiness}; use c to copy the handoff and start fresh"
+        )
     folder = Path(memory["folder"])
     if folder.is_dir():
         os.chdir(folder)
-    print(f"Resuming {memory['source']} conversation in {memory['project']}…")
-    os.execvp(command[0], command)
+    else:
+        print(f"Warning: workspace folder is unavailable ({folder}); staying in the current folder.")
+    branch = workspace_branch(str(folder)) if folder.is_dir() else ""
+    location = f"{folder}" + (f" [{branch}]" if branch else "")
+    print(f"Resuming {memory['source']} task in {location}…")
+    try:
+        os.execvp(command[0], command)
+    except OSError as error:
+        raise RuntimeError(
+            f"Resume failed for {memory['source']}: {error.strerror or error}; use c to copy the handoff"
+        ) from error
 
 
 def activity(records: list[dict[str, str]]) -> Counter:
@@ -665,7 +1137,7 @@ END DATA"""
 
 def run_harness(prompt: str, requested: str = "auto") -> tuple[str, str, str]:
     requested = os.environ.get("HYPOMNEMA_HARNESS", "auto").lower() if requested == "auto" else requested
-    choices = [requested] if requested != "auto" else ["cursor", "claude", "codex"]
+    choices = [requested] if requested != "auto" else ["cursor", "claude", "codex", "copilot"]
     errors = []
     progress = Progress("Finding an available AI harness…")
     progress.start()
@@ -688,6 +1160,7 @@ def run_harness(prompt: str, requested: str = "auto") -> tuple[str, str, str]:
                 "--workspace",
                 cwd,
             ]
+            stdin = prompt
         elif harness == "claude":
             command = [
                 executable,
@@ -698,6 +1171,7 @@ def run_harness(prompt: str, requested: str = "auto") -> tuple[str, str, str]:
                 "--output-format",
                 "text",
             ]
+            stdin = prompt
         elif harness == "codex":
             command = [
                 executable,
@@ -708,6 +1182,27 @@ def run_harness(prompt: str, requested: str = "auto") -> tuple[str, str, str]:
                 "read-only",
                 "-",
             ]
+            stdin = prompt
+        elif harness == "copilot":
+            command = [
+                executable,
+                "--prompt",
+                prompt,
+                "--available-tools",
+                "",
+                "--deny-tool",
+                "shell",
+                "--deny-tool",
+                "write",
+                "--deny-tool",
+                "read",
+                "--deny-tool",
+                "url",
+                "--deny-tool",
+                "memory",
+                "--no-remote",
+            ]
+            stdin = ""
         else:
             errors.append(f"{harness}: unsupported")
             shutil.rmtree(cwd, ignore_errors=True)
@@ -715,7 +1210,7 @@ def run_harness(prompt: str, requested: str = "auto") -> tuple[str, str, str]:
         try:
             result = subprocess.run(
                 command,
-                input=prompt,
+                input=stdin,
                 text=True,
                 capture_output=True,
                 timeout=120,
@@ -814,7 +1309,7 @@ def ask_int(label: str, default: int, minimum: int, maximum: int) -> int:
         print(f"Enter {minimum}–{maximum}.")
 
 
-def read_tui_key(fd: int) -> str:
+def read_tui_key(fd: int, literal: bool = False) -> str:
     key = os.read(fd, 1).decode(errors="ignore")
     if key == "\x1b":
         if select.select([fd], [], [], 0.03)[0]:
@@ -823,6 +1318,10 @@ def read_tui_key(fd: int) -> str:
         return "back"
     if key in ("\r", "\n"):
         return "enter"
+    if key in ("\x08", "\x7f"):
+        return "backspace"
+    if literal and key.isprintable():
+        return key
     if key in ("q", "Q", "\x03"):
         return "quit"
     return {"j": "down", "k": "up", "h": "left", "l": "right"}.get(key, key)
@@ -835,8 +1334,8 @@ def choose_tui_mode() -> str:
     cyan, green, dim, reset = ("\033[36m", "\033[32m", "\033[2m", "\033[0m") if color else ("", "", "", "")
     width = min(max(shutil.get_terminal_size((76, 24)).columns - 2, 58), 82)
     options = [
-        ("report", "Build a work update", "Turn local activity into a report"),
-        ("memory", "Resume a conversation", "Jump back into Cursor, Claude, or Codex"),
+        ("memory", "Resume or find context", "Browse, search, preview, or copy a handoff"),
+        ("report", "Prepare a brief", "Turn recent activity into a work update"),
     ]
     selected = 0
 
@@ -883,16 +1382,22 @@ def choose_tui_mode() -> str:
         sys.stdout.flush()
 
 
-def configure_memory_tui(args) -> bool:
+def configure_memory_tui(args, start_search: bool = False) -> bool:
     fd = sys.stdin.fileno()
     original = termios.tcgetattr(fd)
     color = os.environ.get("NO_COLOR") is None
     cyan, green, dim, reset = ("\033[36m", "\033[32m", "\033[2m", "\033[0m") if color else ("", "", "", "")
     terminal = shutil.get_terminal_size((76, 24))
     width = min(max(terminal.columns - 2, 58), 100)
-    visible = max(3, terminal.lines - 10)
-    current_scope = True
+    visible = max(2, (terminal.lines - 16) // 2)
+    current_scope = False
     selected = 0
+    query = ""
+    searching = start_search
+    status_filter = "All"
+    recent_queries: list[str] = []
+    sync_warning = ""
+    notice = ""
 
     def fit(value: str) -> str:
         return value[:width].ljust(width)
@@ -911,31 +1416,193 @@ def configure_memory_tui(args) -> bool:
         except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
             return [], str(error)
 
-    memories, error = load()
+    sync_progress = Progress("Syncing recent conversation history…")
+    sync_progress.start()
+    try:
+        synced = auto_sync_memories(args.storage, sync_progress.update, args.source)
+        args.memory_synced = True
+        sync_progress.finish(f"Conversation history is current; stored {synced} new records")
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as sync_error:
+        sync_warning = f"Sync warning: {sync_error}"
+        sync_progress.finish("Automatic sync failed; using saved history", False)
+
+    all_memories, error = load()
+    memories = all_memories
+
+    def refresh_results() -> list[dict[str, str]]:
+        filtered = (
+            all_memories
+            if status_filter == "All"
+            else [memory for memory in all_memories if memory["status"] == status_filter]
+        )
+        return search_memories(filtered, query)
+
+    def confirm_launch(memory: dict[str, str], action: str) -> bool:
+        """Show the exact launch target once; Enter confirms, Esc cancels."""
+        try:
+            command = resume_command(memory) if action == "resume" else fresh_command(memory)
+            command_preview = (
+                " ".join(command) + (" …" if len(command) > 2 else "")
+                if action == "resume"
+                else f"{command[0]} <handoff prompt>"
+            )
+        except RuntimeError as error:
+            command_preview = str(error)
+        folder = Path(memory.get("folder", ""))
+        branch = workspace_branch(str(folder)) if folder.is_dir() else ""
+        location = str(folder) if folder.is_dir() else f"{Path.cwd()} (remembered workspace unavailable)"
+        rows = ["\033[2J\033[H", f"╭{'─' * width}╮"]
+        rows.append(line("  HYPOMNEMA / CONFIRM LAUNCH", cyan))
+        rows.append(line(f"  Action:     {'Resume task' if action == 'resume' else 'Start fresh with handoff'}", green))
+        rows.append(line(f"  Harness:    {memory['source']} · {harness_readiness(memory)}", dim))
+        rows.append(line(f"  Workspace:  {location}" + (f" [{branch}]" if branch else ""), dim))
+        rows.append(line(f"  Command:    {command_preview}", dim))
+        rows.append(line(f"  Task:       {compact_text(memory.get('title', ''), width - 16)}", dim))
+        rows.append(f"├{'─' * width}┤")
+        rows.append(line("  Enter launch   Esc cancel", cyan))
+        rows.append(f"╰{'─' * width}╯")
+        sys.stdout.write("\r\n".join(rows))
+        sys.stdout.flush()
+        while True:
+            key = read_tui_key(fd)
+            if key == "enter":
+                return True
+            if key in {"back", "quit"}:
+                return False
+
+    def preview_memory(memory):
+        nonlocal notice
+        tasks = sorted(
+            (
+                item for item in all_memories
+                if item["source"] == memory["source"] and item["session"] == memory["session"]
+            ),
+            key=lambda item: (item["section"], item["task"]),
+        )
+        current = tasks.index(memory)
+        scroll = 0
+        while True:
+            item = tasks[current]
+            body = preview_context_lines(item, width - 6)
+            body_height = max(3, terminal.lines - 9)
+            scroll = min(scroll, max(0, len(body) - body_height))
+            previous = f"← §{tasks[current - 1]['subconversation']} {tasks[current - 1]['title']}" if current else "← start"
+            following = f"§{tasks[current + 1]['subconversation']} {tasks[current + 1]['title']} →" if current + 1 < len(tasks) else "end →"
+            rows = ["\033[2J\033[H", f"╭{'─' * width}╮"]
+            rows.append(line("  HYPOMNEMA / PREVIEW", cyan))
+            rows.append(line(f"  {item['source']} · harness {harness_readiness(item)} · {item['project']} · session {item['session']}", dim))
+            rows.append(line(f"  Workspace: {workspace_summary(item)}", dim))
+            if item.get("folder") and not Path(item["folder"]).is_dir():
+                rows.append(line("  Warning: workspace folder unavailable; resume stays in the current folder.", dim))
+            rows.append(line(f"  §{item['subconversation']} · [{item['status']}] {item['title']}", green))
+            rows.append(line(f"  Last request: {compact_text(item['user_context'], width - 18) or 'Not recorded.'}", dim))
+            rows.append(line(f"  {previous}    {following}", dim))
+            rows.append(f"├{'─' * width}┤")
+            if notice:
+                rows.append(line(f"  {notice}", dim))
+            rows.extend(line(f"  {text}") for text in body[scroll:scroll + body_height])
+            rows.append(f"├{'─' * width}┤")
+            rows.append(line("  ↑↓ scroll   ←→ task   Enter resume   n fresh   c copy   Esc close", dim))
+            rows.append(f"╰{'─' * width}╯")
+            sys.stdout.write("\r\n".join(rows))
+            sys.stdout.flush()
+            key = read_tui_key(fd)
+            if key == "up":
+                scroll = max(0, scroll - 1)
+            elif key == "down":
+                scroll = min(max(0, len(body) - body_height), scroll + 1)
+            elif key == "left" and current:
+                current -= 1
+                scroll = 0
+            elif key == "right" and current + 1 < len(tasks):
+                current += 1
+                scroll = 0
+            elif key == "enter":
+                return item
+            elif key == "n":
+                fresh_with_edit(item)
+            elif key == "c":
+                notice = "Handoff copied to clipboard." if copy_handoff(item) else "Clipboard unavailable."
+            elif key in {"back", "quit"}:
+                return None
+
+    def fresh_with_edit(memory):
+        nonlocal notice
+        termios.tcsetattr(fd, termios.TCSADRAIN, original)
+        sys.stdout.write("\033[?25h\033[2J\033[H")
+        sys.stdout.flush()
+        try:
+            handoff = edit_handoff(memory)
+            if handoff is None:
+                notice = "Handoff edit cancelled (empty handoff)."
+                return
+            tty.setraw(fd)
+            sys.stdout.write("\033[?25l")
+            sys.stdout.flush()
+            if not confirm_launch(memory, "fresh"):
+                notice = "Launch cancelled."
+                return
+            start_fresh_memory(memory, handoff)
+        except (OSError, RuntimeError) as error:
+            notice = str(error)
+        finally:
+            tty.setraw(fd)
+            sys.stdout.write("\033[?25l")
+            sys.stdout.flush()
 
     def draw() -> None:
         scope = f"Current · {Path.cwd().name}" if current_scope else "All projects"
+        coverage = f"{all_memories[-1]['day']} → {all_memories[0]['day']}" if all_memories else "No indexed sessions"
+        search = f"{query}{'▌' if searching else ''}" if query or searching else "Start typing"
         rows = ["\033[2J\033[H", f"╭{'─' * width}╮"]
         rows.append(line("  HYPOMNEMA / MEMORY", cyan))
         rows.append(line("  Return to an agent conversation", dim))
         rows.append(f"├{'─' * width}┤")
         rows.append(line(f"    Scope           ‹ {scope} ›"))
+        rows.append(line(f"    Search          {search}  ·  {len(memories)}/{len(all_memories)}", cyan if searching else dim))
+        rows.append(line(f"    Filter          ‹ {status_filter} ›  (f to change)", dim))
+        if all_memories:
+            latest = all_memories[0]
+            rows.append(line(f"    Last active     [{latest['status']}] {latest['project']} · {latest['title'] or 'Untitled'}", green))
+        rows.append(line(f"    Indexed         {coverage}", dim))
         rows.append(f"├{'─' * width}┤")
         if error:
             rows.append(line(f"  {error}", dim))
-        elif not memories:
-            rows.append(line("  No resumable conversations found.", dim))
-            rows.append(line("  Run a fresh scan to index conversation links.", dim))
         else:
-            start = max(0, min(selected - visible // 2, len(memories) - visible))
-            for index in range(start, min(start + visible, len(memories))):
-                memory = memories[index]
-                marker = "▶" if index == selected else " "
-                date = memory["day"][5:]
-                label = f"  {marker} {date}  {memory['source']:<8} {memory['project']} · {memory['title'] or 'Untitled'}"
-                rows.append(line(label, green if index == selected else ""))
+            if sync_warning:
+                rows.append(line(f"  {sync_warning}", dim))
+            if notice:
+                rows.append(line(f"  {notice}", dim))
+            if not memories:
+                rows.append(line("  No matching conversations." if query else "  No resumable conversations found.", dim))
+                if not query:
+                    rows.append(line("  Automatic sync found no resumable conversation links.", dim))
+                    if recent_queries:
+                        rows.append(line(f"  Recent searches: {', '.join(recent_queries[:3])}", dim))
+                elif query:
+                    rows.append(line("  Try another phrase or switch scope with ←→.", dim))
+                    if recent_queries:
+                        rows.append(line(f"  Recent searches: {', '.join(recent_queries[:3])}", dim))
+            else:
+                start = max(0, min(selected - visible // 2, len(memories) - visible))
+                for index in range(start, min(start + visible, len(memories))):
+                    memory = memories[index]
+                    marker = "▶" if index == selected else " "
+                    date = memory["day"][5:]
+                    match = f" [{memory['match']}]" if query else ""
+                    label = f"  {marker} {date}  {memory['source']:<8} {memory['project']} §{memory['subconversation']} [{memory['status']}] · {harness_readiness(memory)}"
+                    rows.append(line(label, green if index == selected else ""))
+                    rows.append(line(f"      {memory_excerpt(memory)} · {memory['title'] or 'Untitled'}", dim))
         rows.append(f"├{'─' * width}┤")
-        rows.append(line("  ↑↓ choose   ←→ scope   Enter resume   Esc back   q quit", dim))
+        if memories:
+            rows.append(line(f"  {memory_excerpt(memories[selected], query)}", dim))
+            if memories[selected]["outcome"]:
+                rows.append(line(f"  Outcome: {memories[selected]['outcome']}", dim))
+            rows.append(line(f"  Status: {memories[selected]['status']}", dim))
+            rows.append(line(f"  Workspace: {workspace_summary(memories[selected])}", dim))
+            if memories[selected].get("folder") and not Path(memories[selected]["folder"]).is_dir():
+                rows.append(line("  Warning: workspace folder unavailable; resume stays in the current folder.", dim))
+        rows.append(line("  Type query   Backspace edit   Ctrl-U clear   Enter resume task   Esc done" if searching else "  ↑↓ choose   ←→ scope   f filter   / search   ? help   o preview   n start fresh   c copy handoff   Enter resume task", dim))
         rows.append(f"╰{'─' * width}╯")
         sys.stdout.write("\r\n".join(rows))
         sys.stdout.flush()
@@ -945,19 +1612,63 @@ def configure_memory_tui(args) -> bool:
         tty.setraw(fd)
         while True:
             draw()
-            key = read_tui_key(fd)
-            if key == "up" and memories:
+            key = read_tui_key(fd, True)
+            if searching and key == "back":
+                if query:
+                    recent_queries = [query] + [item for item in recent_queries if item != query]
+                searching = False
+            elif key == "\x15":
+                query = ""
+                selected = 0
+                memories = refresh_results()
+            elif searching and key == "backspace":
+                query = query[:-1]
+                selected = 0
+                memories = refresh_results()
+            elif searching and len(key) == 1 and key.isprintable():
+                query += key
+                selected = 0
+                memories = refresh_results()
+            elif key == "/" and not searching:
+                searching = True
+            elif key == "?" and not searching:
+                notice = "↑↓ choose · Enter resume · n fresh · / search · f filter · o preview · c copy · Esc back"
+            elif key == "f" and not searching:
+                status_filter = {"All": "Open", "Open": "Blocked", "Blocked": "Completed", "Completed": "All"}[status_filter]
+                selected = 0
+                memories = refresh_results()
+            elif key == "o" and memories:
+                chosen = preview_memory(memories[selected])
+                if chosen:
+                    if confirm_launch(chosen, "resume"):
+                        args.folder = [str(Path.cwd())] if current_scope else None
+                        args.source = [chosen["source"]]
+                        args.resume = chosen["session"]
+                        return True
+            elif key == "n" and memories:
+                fresh_with_edit(memories[selected])
+            elif key == "c" and memories:
+                notice = "Handoff copied to clipboard." if copy_handoff(memories[selected]) else "Clipboard unavailable."
+            elif not searching and len(key) == 1 and key.isprintable():
+                searching = True
+                query = key
+                selected = 0
+                memories = refresh_results()
+            elif key == "up" and memories:
                 selected = (selected - 1) % len(memories)
             elif key == "down" and memories:
                 selected = (selected + 1) % len(memories)
             elif key in {"left", "right"}:
                 current_scope = not current_scope
                 selected = 0
-                memories, error = load()
+                all_memories, error = load()
+                memories = refresh_results()
             elif key == "enter" and memories:
-                args.folder = [str(Path.cwd())] if current_scope else None
-                args.resume = memories[selected]["session"]
-                return True
+                if confirm_launch(memories[selected], "resume"):
+                    args.folder = [str(Path.cwd())] if current_scope else None
+                    args.source = [memories[selected]["source"]]
+                    args.resume = memories[selected]["session"]
+                    return True
             elif key == "back":
                 return False
             elif key == "quit":
@@ -995,10 +1706,11 @@ def configure_tui(args) -> bool:
     ]
     details = [("brief", "Brief"), ("normal", "Normal"), ("detailed", "Detailed")]
     harnesses = [
-        ("auto", "Auto · Cursor → Claude → Codex"),
+        ("auto", "Auto · Cursor → Claude → Codex → Copilot"),
         ("cursor", "Cursor Agent"),
         ("claude", "Claude"),
         ("codex", "Codex"),
+        ("copilot", "Copilot"),
         ("none", "No AI · local highlights"),
     ]
     fields = ["Period", "Scope", "Report type", "Bullet points", "Detail", "Summarizer", "Generate report"]
@@ -1132,7 +1844,8 @@ def configure_interactively(args) -> None:
     if sys.stdin.isatty() and sys.stdout.isatty():
         try:
             while True:
-                if choose_tui_mode() == "report":
+                mode = choose_tui_mode()
+                if mode == "report":
                     if configure_tui(args):
                         break
                 elif configure_memory_tui(args):
@@ -1202,10 +1915,11 @@ def configure_interactively(args) -> None:
         ("detailed", "Detailed"),
     ])
     args.harness = choose("Summarizer", [
-        ("auto", "Auto: Cursor → Claude → Codex"),
+        ("auto", "Auto: Cursor → Claude → Codex → Copilot"),
         ("cursor", "Cursor Agent"),
         ("claude", "Claude"),
         ("codex", "Codex"),
+        ("copilot", "Copilot"),
         ("none", "No AI: raw highlights"),
     ])
     args.no_ai = args.harness == "none"
@@ -1229,7 +1943,50 @@ def self_test() -> None:
     assert activity(sample)["Claude"] == 1 and "ship it" in fallback(sample)
     memories = conversation_memories(sample)
     assert memories[0]["title"] == "ship it"
+    assert memories[0]["subconversation"] == "1.1"
     assert resume_command(memories[0]) == ["claude", "--resume", sample[0]["session"]]
+    assert fresh_command(memories[0])[0] == "claude" and "Continue this task" in fresh_command(memories[0])[1]
+    assert fresh_command(memories[0], "edited handoff") == ["claude", "edited handoff"]
+    context_memories = conversation_memories(sample + [{
+        **sample[0],
+        "text": "Investigate the OAuth timeout",
+        "day": "2026-07-30",
+    }])
+    assert len(context_memories) == 2 and context_memories[0]["subconversation"] == "1.2"
+    assert context_memories[0]["previous_title"] == "ship it"
+    assert search_memories(context_memories, "oauth timeout") == context_memories[:1]
+    assert search_memories(context_memories, "investgate ouath") == context_memories[:1]
+    assert context_memories[0]["match"].endswith("Typo")
+    cleared = conversation_memories(sample + [
+        {**sample[0], "role": "assistant", "text": "shipped"},
+        {**sample[0], "text": "/clear"},
+        {**sample[0], "text": "Fix the billing webhook", "day": "2026-07-30"},
+        {**sample[0], "role": "assistant", "text": "fixed", "day": "2026-07-30"},
+    ])
+    assert [memory["subconversation"] for memory in cleared] == ["2.1", "1.1"]
+    assert [memory["outcome"] for memory in cleared] == ["fixed", "shipped"]
+    assert [memory["status"] for memory in cleared] == ["Completed", "Completed"]
+    assert not cleared[0]["previous_title"] and not cleared[1]["next_title"]
+    assert "assistant: fixed" in preview_context_lines(cleared[0], 20)
+    assert search_memories(cleared, "billing") == cleared[:1]
+    assert "/clear" not in "\n".join(memory["context"] for memory in cleared)
+    assert boundary_prompt("<command-name>/clear</command-name>") == ""
+    assert boundary_prompt("Explain /clear") is None
+    prompted_boundary = conversation_memories(sample + [
+        {**sample[0], "text": "/clear Fix the billing webhook"},
+        {**sample[0], "role": "assistant", "text": "fixed"},
+    ])
+    assert [memory["title"] for memory in prompted_boundary] == ["Fix the billing webhook", "ship it"]
+    assert boundary_prompt("/new Start fresh") == "Start fresh"
+    assert boundary_prompt("/reset\nTry again") == "Try again"
+    assert boundary_prompt("<command-name>/clear</command-name><command-args>Retry</command-args>") == "Retry"
+    assert search_memories([], "anything") == []
+    assert not memory_sync_due(900, 1_000) and memory_sync_due(0, 1_000)
+    assert context_memories[0]["preview"] == "Investigate the OAuth timeout"
+    assert "OAuth timeout" in memory_excerpt(context_memories[0], "oauth")
+    assert "OAuth timeout" in memory_for_agent(context_memories[0])["user_context"]
+    assert "Continue this task" in handoff_text(context_memories[0])
+    assert status_from_outcome("Waiting on the integration test") == "Blocked"
     assert "projects, outcomes" in standup_prompt(dt.date(2026, 7, 29), sample, 12, detail="detailed")
     assert "ACCOMPLISHMENTS" in standup_prompt(dt.date(2026, 7, 29), sample, 12, report="accomplishments")
     assert in_folders(sample[0], ["/tmp"]) and not in_folders(sample[0], ["/var"])
@@ -1245,7 +2002,60 @@ def self_test() -> None:
         }) + "\n")
         parsed_session = parse_file("Claude", claude_session, {dt.date(2026, 7, 29)})
         assert parsed_session[0]["session"] == sample[0]["session"] and parsed_session[0]["text"] == "ship it"
+        copilot_dir = root / "session-state" / sample[0]["session"]
+        copilot_dir.mkdir(parents=True)
+        copilot_session = copilot_dir / "events.jsonl"
+        copilot_session.write_text(
+            json.dumps({
+                "type": "session.start",
+                "timestamp": "2026-07-29T12:00:00Z",
+                "data": {"sessionId": sample[0]["session"], "context": {"cwd": "/tmp/demo"}},
+            })
+            + "\n"
+            + json.dumps({
+                "type": "user.message",
+                "timestamp": "2026-07-29T12:01:00Z",
+                "data": {"content": "ship it"},
+            })
+            + "\n"
+            + json.dumps({
+                "type": "assistant.message",
+                "timestamp": "2026-07-29T12:02:00Z",
+                "data": {"content": "done"},
+            })
+            + "\n"
+            + json.dumps({
+                "type": "session.context_changed",
+                "timestamp": "2026-07-29T12:03:00Z",
+                "data": {"cwd": "/tmp/other"},
+            })
+            + "\n"
+            + json.dumps({
+                "type": "user.message",
+                "timestamp": "2026-07-29T12:04:00Z",
+                "data": {"content": "continue here"},
+            })
+            + "\n"
+        )
+        parsed_copilot = parse_file("Copilot", copilot_session, {dt.date(2026, 7, 29)})
+        assert [r["role"] for r in parsed_copilot] == ["user", "assistant", "user"]
+        assert parsed_copilot[0]["session"] == sample[0]["session"]
+        assert parsed_copilot[0]["folder"] == str(Path("/tmp/demo").resolve())
+        assert parsed_copilot[-1]["folder"] == str(Path("/tmp/other").resolve())
+        assert resume_command({"source": "Copilot", "session": sample[0]["session"]}) == [
+            "copilot", "--resume", sample[0]["session"]
+        ]
         database = root / "history.sqlite3"
+        assert sqlite_metadata("test", "value", database) == "value"
+        assert sqlite_metadata("test", path=database) == "value"
+        fake_embed = lambda texts, _model, _progress: [
+            [1.0, 0.0] if "oauth" in text.casefold() else [0.0, 1.0]
+            for text in texts
+        ]
+        vector_matches = vector_search(context_memories, "oauth issue", "test", database, fake_embed)
+        assert vector_matches[0]["title"] == "Investigate the OAuth timeout"
+        assert vector_matches[0]["vector_score"] == 1.0
+        assert cosine_similarity([1, 0], [0, 1]) == 0
         unlinked = [{**sample[0], "session": ""}]
         assert store_sqlite(unlinked, database) == 1
         assert store_sqlite(sample, database) == 1 and store_sqlite(sample, database) == 0
@@ -1276,44 +2086,117 @@ def self_test() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Remember yesterday, before standup remembers for you.")
+    parser = argparse.ArgumentParser(description="Recall agent work, search task exchanges, and resume the thread.")
     parser.add_argument("--date", type=dt.date.fromisoformat, help="day to inspect (YYYY-MM-DD)")
     parser.add_argument("--days", type=int, choices=range(1, 31), metavar="1–30", default=1, help="days ending on the selected date")
     parser.add_argument("--bullets", type=int, choices=range(2, 21), metavar="2–20", default=8, help="report bullets")
     parser.add_argument("--detail", choices=("brief", "normal", "detailed"), default="normal", help="summary detail level")
     parser.add_argument("--report", choices=REPORTS, default="standup", help="report type")
-    parser.add_argument("--harness", choices=("auto", "cursor", "claude", "codex", "none"), default="auto", help="summary harness")
+    parser.add_argument("--harness", choices=("auto", "cursor", "claude", "codex", "copilot", "none"), default="auto", help="summary harness")
     parser.add_argument("--folder", action="append", metavar="PATH", help="only include this folder (repeatable)")
     parser.add_argument("--source", action="append", metavar="NAME", help="built-in or hypomnema-source-NAME collector (repeatable)")
     parser.add_argument("--storage", choices=("sqlite", "git", "none"), default="sqlite", help="activity storage backend")
     parser.add_argument("--history", action="store_true", help="read saved activity instead of scanning source history")
     memory = parser.add_mutually_exclusive_group()
-    memory.add_argument("--memories", action="store_true", help="list resumable agent conversations")
+    memory.add_argument("--memories", action="store_true", help="list resumable conversation tasks")
     memory.add_argument("--resume", nargs="?", const="", metavar="SESSION", help="resume a remembered conversation")
-    parser.add_argument("-i", "--interactive", action="store_true", help="choose options interactively")
+    parser.add_argument("--search", metavar="WORDS", help="search remembered conversation context")
+    parser.add_argument("--vector", nargs="?", const="embeddinggemma", metavar="MODEL", help="rank --search with local Ollama embeddings")
+    parser.add_argument("--session", metavar="SESSION", help="list task exchanges from one conversation")
+    parser.add_argument("-i", "--i", "--interactive", dest="interactive", action="store_true", help="choose options interactively")
     parser.add_argument("--json", action="store_true", help="emit records for chat agents")
     parser.add_argument("--no-ai", action="store_true", help="do not send extracted activity to an agent CLI")
     parser.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.vector and not args.search:
+        parser.error("--vector requires --search")
+    if args.vector and args.storage != "sqlite":
+        parser.error("--vector requires --storage sqlite")
+    if len(sys.argv) == 1 and sys.stdin.isatty() and sys.stdout.isatty():
+        args.interactive = True
     if args.self_test:
         self_test()
         return
-    if args.interactive and not (args.memories or args.resume is not None):
+    if args.interactive and not (args.memories or args.resume is not None or args.search or args.session):
         configure_interactively(args)
-    if args.memories or args.resume is not None:
-        progress = Progress("Loading conversation memories…")
+    if args.memories or args.resume is not None or args.search or args.session:
+        progress = Progress("Syncing recent conversation history…")
         progress.start()
+        sync_warning = ""
+        vector_warning = ""
+        vector_matches = []
+        synced = 0
+        if not getattr(args, "memory_synced", False):
+            try:
+                synced = auto_sync_memories(args.storage, progress.update, args.source)
+            except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+                sync_warning = str(error)
         try:
             records = load_memory_records(args.storage, args.folder)
             if args.source:
                 selected = {source_key(name) for name in args.source}
                 records = [record for record in records if source_key(record["source"]) in selected]
-            memories = conversation_memories(records)
+            all_memories = conversation_memories(records)
+            if args.session:
+                all_memories = [memory for memory in all_memories if memory["session"] == args.session]
+            memories = all_memories
+            if args.search:
+                memories = search_memories(memories, args.search)
+            lexical_matches = memories
+            if args.vector:
+                try:
+                    vector_matches = vector_search(
+                        all_memories, args.search, args.vector, progress=progress.update
+                    )
+                    memories = vector_matches
+                except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+                    vector_warning = str(error)
         except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
             progress.finish("Memory failed", False)
             parser.error(str(error))
-        progress.finish(f"Found {len(memories)} conversation memories")
-        if args.memories:
+        progress.finish(
+            f"Found {len(memories)} conversation tasks; stored {synced} new records"
+            + (f"; sync warning: {sync_warning}" if sync_warning else "")
+            + (f"; vector warning: {vector_warning}" if vector_warning else ""),
+            not sync_warning and not vector_warning,
+        )
+        if vector_warning and not args.json:
+            print(f"Vector search unavailable: {vector_warning}\nUsing lexical matches.", file=sys.stderr)
+        if args.json:
+            seen = set()
+            candidates = []
+            # ponytail: cap semantic context at 100 recent task exchanges; add paging or embeddings if recall suffers.
+            for memory in lexical_matches[:20] + vector_matches + all_memories[:100]:
+                key = (memory["source"], memory["session"], memory["subconversation"])
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(memory_for_agent(memory))
+            days = [memory["day"] for memory in all_memories]
+            sessions = {(memory["source"], memory["session"]) for memory in all_memories}
+            print(json.dumps({
+                "query": args.search or "",
+                "sync": {"stored": synced, "warning": sync_warning},
+                "coverage": {
+                    "oldest": min(days) if days else None,
+                    "newest": max(days) if days else None,
+                },
+                "total_memories": len(all_memories),
+                "total_sessions": len(sessions),
+                "total_subconversations": len(all_memories),
+                "lexical_match_count": len(lexical_matches),
+                "lexical_matches": [memory_for_agent(memory, 300) for memory in lexical_matches[:20]],
+                "vector": {
+                    "model": args.vector or "",
+                    "warning": vector_warning,
+                    "match_count": len(vector_matches),
+                },
+                "vector_matches": [memory_for_agent(memory, 300) for memory in vector_matches],
+                "semantic_candidate_count": len(candidates),
+                "semantic_candidates_truncated": len(candidates) < len(all_memories),
+                "semantic_candidates": candidates,
+            }, ensure_ascii=False, indent=2))
+            return
+        if args.memories or args.session or (args.search and args.resume is None):
             print(render_memories(memories[:20]))
         else:
             try:

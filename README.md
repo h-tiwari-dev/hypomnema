@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <strong>Never lose the thread.</strong>
+  <strong>Local memory for AI coding work.</strong>
 </p>
 
 <p align="center">
-  <code>local-first</code> · <code>stdlib only</code> · <code>single file</code>
+  <code>local-first</code> · <code>macOS</code> · <code>Python 3.8+</code> · <code>stdlib only</code>
 </p>
 
 <p align="center">
@@ -17,20 +17,47 @@
   <a href="#talk-to-your-history">Use with an agent</a> ·
   <a href="#choose-where-memory-lives">Storage</a> ·
   <a href="#jump-back-in">Resume</a> ·
+  <a href="#local-vector-search">Vector search</a> ·
+  <a href="#ux-roadmap">UX roadmap</a> ·
   <a href="#bring-your-own-source">Extend</a>
 </p>
 
 AI coding sessions create valuable context, then bury it in transcript folders.
-Hypomnema turns that history into something you can use again.
+Hypomnema turns that history into a local, searchable work memory you can safely
+return to.
 
-| Recall | Report | Resume |
+| Find context | Make updates | Continue safely |
 | --- | --- | --- |
-| Find what happened in any local agent session | Turn real activity into a standup or worklog | Reopen the original conversation and continue |
+| Search task history across Cursor, Claude, Codex, and Copilot | Turn real activity into a standup, summary, or blocker report | Resume the original task or start a fresh harness session with an editable handoff |
 
 > Your work already has a history. Hypomnema makes it useful.
 
 Local history stays on your machine unless your chosen agent sends it remotely
 or you commit and push a Git archive.
+
+## Why Hypomnema
+
+Most coding assistants remember a conversation only while you are inside it.
+Hypomnema gives that work a durable local index without replacing the native
+harnesses you already use.
+
+- **One place to look:** browse or search work across supported coding agents.
+- **Evidence first:** results retain task context, status, outcome, and source.
+- **Safe continuation:** confirm the harness, workspace, and branch before launch.
+- **Flexible recovery:** edit a handoff, start fresh, or copy context when native
+  session resume is unavailable.
+- **Private by default:** SQLite, Git JSONL, or no archive; no hosted service is
+  required.
+
+## See the flow
+
+<p align="center">
+  <img src="./assets/hypomnema-workflow.svg" alt="Hypomnema workflow: collect coding sessions, remember them locally, then search or resume safely" width="100%">
+</p>
+
+The workflow illustration is an SVG asset, so it stays sharp in dark and light
+repository views. Its subtle motion is disabled automatically when the viewer
+requests reduced motion.
 
 ## Start in 60 seconds
 
@@ -40,16 +67,28 @@ Requires macOS and Python 3.8+.
 git clone https://github.com/h-tiwari-dev/hypomnema.git
 cd hypomnema
 ./install.sh
-hypomnema --interactive
+hypomnema
+```
+
+That opens the interactive picker. Select **Resume or find context**, choose a
+task, then use:
+
+```text
+Enter  resume the original task
+n      edit the handoff and start a fresh task
+o      preview the full context
+c      copy the handoff
+/      search
+f      filter by status
 ```
 
 The installer adds the CLI to `~/.local/bin` and installs the user-level skill
-for Cursor, Claude Code, and Codex. No Python packages, account, or API key are
-required.
+for Cursor, Claude Code, Codex, and GitHub Copilot. No Python packages, account,
+or API key are required.
 
 ### Prefer delegating setup?
 
-Paste this into Cursor, Claude Code, or Codex:
+Paste this into Cursor, Claude Code, Codex, or Copilot:
 
 ```text
 Install Hypomnema from https://github.com/h-tiwari-dev/hypomnema.
@@ -57,9 +96,9 @@ Install Hypomnema from https://github.com/h-tiwari-dev/hypomnema.
 Clone it to a temporary folder, review install.sh, and run it. Verify
 `hypomnema --self-test` and confirm that `SKILL.md` exists at
 `~/.cursor/skills/hypomnema` for Cursor, `~/.claude/skills/hypomnema` for
-Claude Code, and `~/.agents/skills/hypomnema` for Codex. Do not modify my
-current project. Tell me to start a new agent session without resuming this
-one.
+Claude Code, and `~/.agents/skills/hypomnema` for Codex and Copilot. Do not
+modify my current project. Tell me to start a new agent session without
+resuming this one.
 ```
 
 ## Talk to your history
@@ -70,6 +109,7 @@ Start a new session after installation. Do not resume the installer session:
 Cursor Agent: /hypomnema What did I work on yesterday?
 Claude Code:  /hypomnema Prepare my standup.
 Codex:        $hypomnema Summarize the last seven days.
+Copilot:      /hypomnema What did I work on yesterday?
 ```
 
 Then talk to it normally:
@@ -126,17 +166,18 @@ Give me 10 points.
 
 </details>
 
-Cursor and Claude use `/hypomnema`; Codex uses `$hypomnema`.
+Cursor, Claude, and Copilot use `/hypomnema`; Codex uses `$hypomnema`.
 
 | Agent | Installed skill |
 | --- | --- |
 | Cursor Agent | `~/.cursor/skills/hypomnema/SKILL.md` |
 | Claude Code | `~/.claude/skills/hypomnema/SKILL.md` |
 | Codex | `~/.agents/skills/hypomnema/SKILL.md` |
+| GitHub Copilot | `~/.agents/skills/hypomnema/SKILL.md` |
 
-In Cursor or Codex, run `/skills` to confirm it is available. In Claude Code,
-type `/hypomnema` or ask “What skills are available?” If it is missing, verify
-the file above and start a new session.
+In Cursor, Codex, or Copilot, run `/skills` to confirm it is available. In Claude
+Code, type `/hypomnema` or ask “What skills are available?” If it is missing,
+verify the file above and start a new session.
 
 Without the skill, any agent can still use the CLI:
 
@@ -149,7 +190,7 @@ anything the records do not support.
 ## One tool, four steps
 
 ```text
-Cursor / Claude / Codex / custom collectors
+Cursor / Claude / Codex / Copilot / custom collectors
                       ↓
             local activity records
                       ↓
@@ -158,28 +199,49 @@ Cursor / Claude / Codex / custom collectors
         reports, search, and session resume
 ```
 
-- Reads local Cursor, Claude Code, Claude Desktop, and Codex history.
+- Reads local Cursor, Claude Code, Claude Desktop, Codex, and Copilot history.
 - Filters by date, project folder, and source.
-- Uses Cursor Agent, Claude, or Codex for summaries when available.
+- Uses Cursor Agent, Claude, Codex, or Copilot for summaries when available.
 - Remembers session IDs so you can return to the original conversation.
+- Splits sessions into task exchanges and treats `/clear`, `/new`, and `/reset`
+  as hard boundaries without dropping an inline prompt.
+- Automatically syncs the latest 30 days before memory search or resume.
 - Supports custom collectors without a plugin framework.
 
-## The useful commands
+## Command reference
 
 | Goal | Command |
 | --- | --- |
-| Open the TUI | `hypomnema --interactive` |
-| Prepare yesterday's update | `hypomnema` |
+| Open the TUI (default) | `hypomnema` or `hypomnema -i` |
+| Prepare yesterday's update directly | `hypomnema --report standup` |
 | Summarize the last week | `hypomnema --days 7` |
 | Limit results to this project | `hypomnema --folder .` |
 | Skip AI summarization | `hypomnema --no-ai` |
 | Read saved history | `hypomnema --history --days 30` |
 | List remembered conversations | `hypomnema --memories --folder .` |
+| Search conversation context | `hypomnema --search "WORDS"` |
+| Search by meaning locally | `hypomnema --search "WORDS" --vector` |
+| Agent-assisted semantic search | `hypomnema --search "WORDS" --json` |
+| Inspect tasks in one conversation | `hypomnema --session SESSION_ID --json` |
 | Resume a conversation | `hypomnema --resume` |
 | Store project history in Git | `hypomnema --storage git --folder .` |
 | Return JSON to an agent | `hypomnema --json --folder .` |
 
 Run `hypomnema --help` for every option.
+
+## Local vector search
+
+Local vector search uses Ollama and caches embeddings in the existing SQLite
+database. Install the model once, then opt in per search:
+
+```sh
+ollama pull embeddinggemma
+hypomnema --search "authentication timeout" --vector
+```
+
+Pass another local Ollama embedding model as `--vector MODEL`. Vector search
+requires SQLite storage; ordinary lexical search remains the fallback if
+Ollama or the model is unavailable.
 
 ## Choose where memory lives
 
@@ -213,16 +275,42 @@ hypomnema --resume
 hypomnema --resume SESSION_ID
 ```
 
-Hypomnema opens the remembered workspace and delegates to the original agent:
+The picker shows indexed coverage, result counts, status, and evidence. Choose
+`Resume or find context` to browse recent tasks or start searching in the same view.
+Press `o` to preview full context, `n` to edit the handoff in `$VISUAL`/`$EDITOR` and start fresh, `c` to copy it, `↑↓` to scroll, and
+`←→` to move between task exchanges. Press `f` to filter open/blocked/completed
+work and `?` to show the keyboard guide. Each task shows its harness, workspace
+folder, and git branch when available; if the folder moved, Hypomnema warns and
+keeps the current folder instead of silently changing location. SQLite automatic sync runs at most once
+every five minutes; Git storage syncs the current repository when memory opens.
+
+Each row is a user/assistant task exchange such as `§1.2`. `/clear`, `/new`,
+and `/reset` start the next section; an inline prompt starts its first task.
+
+Hypomnema opens the remembered workspace (and preserves its folder/branch when
+available) before delegating to the original agent:
 
 | Source | Resume command |
 | --- | --- |
 | Cursor | `agent --resume SESSION_ID` |
 | Claude Code | `claude --resume SESSION_ID` |
 | Codex | `codex resume SESSION_ID` |
+| Copilot | `copilot --resume SESSION_ID` |
 
 Claude Desktop conversations can appear in reports but cannot be resumed
 through the Claude Code CLI.
+
+## UX roadmap
+
+Hypomnema is designed as a safe “get back to work” layer across coding
+harnesses. The current flow supports task status, harness readiness, workspace
+and branch visibility, editable handoffs, launch confirmation, fresh-session
+handoffs, search, filters, and copy-only recovery.
+
+Planned UX improvements are tracked in
+[UX_IMPROVEMENT_NOTES.md](UX_IMPROVEMENT_NOTES.md). The current priority is to
+add installed-harness fallback, worktree awareness, session health, lifecycle
+actions, and conservative secret redaction while keeping the local-first TUI.
 
 ## Bring your own source
 
@@ -255,6 +343,8 @@ Collectors are trusted executables and run with your user permissions.
 - `--no-ai` skips AI summarization.
 - `--storage none` prevents an activity archive from being written.
 - SQLite is permission-restricted but not encrypted.
+- Vector search sends text only to Ollama on `127.0.0.1` and stores its vectors
+  in SQLite.
 - Git storage is unredacted and remains in Git history after deletion.
 
 ## Remove Hypomnema
