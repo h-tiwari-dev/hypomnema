@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 820" role="img" aria-labelledby="title desc">
+  <title id="title">Hypomnema interactive demo</title>
+  <desc id="desc">Animated terminal walkthrough showing search, task preview, editable handoff, and launch confirmation.</desc>
+  <defs>
+    <style>
+      .mono { font: 500 20px 'SFMono-Regular', Consolas, monospace; fill: #e7dcc3; }
+      .small { font: 500 16px 'SFMono-Regular', Consolas, monospace; fill: #a99881; }
+      .accent { fill: #c8954b; }
+      .green { fill: #c5d6a6; }
+      .frame { opacity: 0; animation: show 16s infinite; }
+      .f2 { animation-delay: 4s; }
+      .f3 { animation-delay: 8s; }
+      .f4 { animation-delay: 12s; }
+      .cursor { animation: blink 1s steps(2) infinite; }
+      @keyframes show { 0%, 5% { opacity: 1; } 25%, 100% { opacity: 0; } }
+      @keyframes blink { 50% { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { .frame { animation: none; opacity: 0; } .f1 { opacity: 1; } .cursor { animation: none; } }
+    </style>
+  </defs>
+  <rect width="1440" height="820" rx="24" fill="#17130f"/>
+  <rect x="48" y="44" width="1344" height="732" rx="20" fill="#211a15" stroke="#66503b" stroke-width="3"/>
+  <rect x="48" y="44" width="1344" height="62" rx="20" fill="#33231c"/>
+  <circle cx="88" cy="75" r="9" fill="#b44e2f"/><circle cx="118" cy="75" r="9" fill="#c8954b"/><circle cx="148" cy="75" r="9" fill="#e7dcc3"/>
+  <text x="190" y="82" class="small">hypomnema · local memory · demo</text>
+
+  <g class="frame f1">
+    <text x="90" y="155" class="small">HYPOMNEMA / MEMORY</text>
+    <text x="90" y="194" class="mono">Search      oauth timeout▌</text>
+    <text x="90" y="232" class="small">Filter      ‹ All ›</text>
+    <path d="M90 258h1260" stroke="#66503b" stroke-width="2"/>
+    <rect x="80" y="286" width="1280" height="92" rx="12" fill="#33231c" stroke="#b44e2f" stroke-width="3"/>
+    <text x="112" y="326" class="mono green">▶ 08-02  Claude · api-service §2.1 [Open] · ready</text>
+    <text x="112" y="358" class="small">      OAuth timeout retry guard still needs a regression test</text>
+    <text x="90" y="430" class="small">1/12 matches · user prompt ranked first</text>
+    <text x="90" y="680" class="accent mono">Enter resume task   o preview   n start fresh   c copy handoff</text>
+  </g>
+
+  <g class="frame f2">
+    <text x="90" y="155" class="small">HYPOMNEMA / PREVIEW</text>
+    <text x="90" y="194" class="small">Claude · harness ready · ~/work/api-service [main]</text>
+    <text x="90" y="232" class="mono green">§2.1 · [Open] OAuth timeout retry guard</text>
+    <path d="M90 258h1260" stroke="#66503b" stroke-width="2"/>
+    <text x="90" y="306" class="small">user: Investigate the OAuth timeout in the callback path</text>
+    <text x="90" y="344" class="small">assistant: Traced the retry loop; the guard is implemented.</text>
+    <text x="90" y="382" class="small">assistant: Remaining: add a regression test and rerun CI.</text>
+    <path d="M90 420h1260" stroke="#66503b" stroke-width="2"/>
+    <text x="90" y="468" class="mono">↑↓ scroll   ←→ task   n edit handoff   c copy</text>
+    <text x="90" y="680" class="accent mono">Enter resume task   Esc close</text>
+  </g>
+
+  <g class="frame f3">
+    <text x="90" y="155" class="small">HYPOMNEMA / HANDOFF EDITOR</text>
+    <text x="90" y="194" class="mono">Continue this task in api-service.</text>
+    <text x="90" y="232" class="mono">Task: OAuth timeout retry guard</text>
+    <text x="90" y="270" class="mono">Status: Open</text>
+    <text x="90" y="308" class="mono">Last request: Investigate the callback timeout</text>
+    <text x="90" y="346" class="mono">Next: add the regression test and rerun CI</text>
+    <path d="M90 382h1260" stroke="#66503b" stroke-width="2"/>
+    <text x="90" y="430" class="small">Edit the handoff in $VISUAL or $EDITOR.</text>
+    <text x="90" y="468" class="small">The edited prompt is passed to the fresh harness.</text>
+    <text x="90" y="680" class="accent mono">Save and close editor   Esc cancel</text>
+  </g>
+
+  <g class="frame f4">
+    <text x="90" y="155" class="small">HYPOMNEMA / CONFIRM LAUNCH</text>
+    <text x="90" y="205" class="mono green">Action:     Start fresh with handoff</text>
+    <text x="90" y="245" class="mono">Harness:    Claude · ready</text>
+    <text x="90" y="285" class="mono">Workspace:  ~/work/api-service [main]</text>
+    <text x="90" y="325" class="mono">Command:    claude &lt;edited handoff prompt&gt;</text>
+    <text x="90" y="365" class="mono">Task:       OAuth timeout retry guard</text>
+    <path d="M90 405h1260" stroke="#66503b" stroke-width="2"/>
+    <text x="90" y="458" class="small">The launch target is visible before anything changes.</text>
+    <text x="90" y="680" class="accent mono">Enter launch   Esc cancel</text>
+  </g>
+</svg>

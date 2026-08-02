@@ -61,6 +61,15 @@ requests reduced motion.
 
 ## The interface
 
+### Watch the loop
+
+<p align="center">
+  <img src="./assets/hypomnema-demo.svg" alt="Animated Hypomnema demo showing search, preview, handoff editing, and launch confirmation" width="100%">
+</p>
+
+The demo follows the real interaction model: search a task, inspect evidence,
+edit the handoff, and confirm the exact harness/workspace launch target.
+
 <p align="center">
   <img src="./assets/hypomnema-tui.svg" alt="Hypomnema terminal task picker with search, status, harness readiness, workspace, and keyboard actions" width="100%">
 </p>
